@@ -10,4 +10,159 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Add your models here
+// ----------------------
+// User & Auth Models
+// ----------------------
+model User {
+  id        String          @id @default(uuid()) @db.Uuid
+  email     String          @unique
+  password  String
+  name      String?
+  role      Role            @default(USER)
+  reviews   ProductReview[]
+  orders    Order[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+// ----------------------
+// E-commerce Models
+// ----------------------
+
+model Category {
+  id          String    @id @default(uuid()) @db.Uuid
+  title       String
+  slug        String    @unique
+  description String?
+  image       String? // URL from MinIO
+  parentId    String?   @db.Uuid
+  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Collection {
+  id          String    @id @default(uuid()) @db.Uuid
+  title       String
+  slug        String    @unique
+  description String?
+  image       String? // URL from MinIO
+  products    Product[]
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// Dynamic Specifications (e.g., Fabric, Care, Origin)
+model SpecificationKey {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique // e.g. "material", "care_instruction"
+  label     String // e.g. "جنس پارچه", "نحوه شستشو"
+  type      SpecType @default(TEXT)
+  options   String[] // For SELECT type
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum SpecType {
+  TEXT
+  NUMBER
+  SELECT
+  MULTI_SELECT
+}
+
+model Product {
+  id              String   @id @default(uuid()) @db.Uuid
+  title           String
+  slug            String   @unique
+  description     String
+  
+  // SEO
+  metaTitle       String?
+  metaDescription String?
+
+  // Media (General product images/video)
+  images String[] // URLs stored as array of strings
+  video  String? // URL
+
+  // Relations
+  categoryId String   @db.Uuid
+  category   Category @relation(fields: [categoryId], references: [id])
+  collections Collection[]
+
+  // Specifications (JSON with validation against SpecificationKey)
+  // Format: { "material": "Cotton", "care": "Hand wash" }
+  specifications Json?
+
+  // Stats
+  soldCount     Int   @default(0)
+  viewCount     Int   @default(0)
+  averageRating Float @default(0)
+  reviewCount   Int   @default(0)
+
+  // Variants (Size/Color)
+  variants ProductVariant[]
+
+  // Social
+  reviews ProductReview[]
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ProductVariant {
+  id        String  @id @default(uuid()) @db.Uuid
+  productId String  @db.Uuid
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  sku String @unique
+
+  // Attributes
+  size      String?
+  color     String?
+  colorCode String? // Hex code for color
+
+  // Pricing & Inventory
+  price         Decimal  @db.Decimal(10, 2)
+  discountPrice Decimal? @db.Decimal(10, 2)
+  stock         Int      @default(0)
+
+  // Media specific to variant (e.g. Red shirt image)
+  images String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ProductReview {
+  id        String  @id @default(uuid()) @db.Uuid
+  productId String  @db.Uuid
+  product   Product @relation(fields: [productId], references: [id])
+  userId    String  @db.Uuid
+  user      User    @relation(fields: [userId], references: [id])
+
+  rating  Int // 1-5
+  comment String?
+
+  isApproved Boolean @default(false) // Admin approval
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Placeholder for Order
+model Order {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
