@@ -12,9 +12,11 @@ export class CollectionService {
     private minioService: MinioService,
   ) {}
 
-  async create(createCollectionDto: CreateCollectionDto, file?: Express.Multer.File) {
+  async create(
+    createCollectionDto: CreateCollectionDto,
+    file?: Express.Multer.File,
+  ) {
     const slug = slugify(createCollectionDto.title, { lower: true });
-    
     let imageUrl: string | undefined;
     if (file) {
       imageUrl = await this.minioService.uploadFile(file, 'collections');
@@ -23,7 +25,10 @@ export class CollectionService {
     return this.prisma.collection.create({
       data: {
         ...createCollectionDto,
-        isActive: createCollectionDto.isActive !== undefined ? String(createCollectionDto.isActive) === 'true' : true,
+        isActive:
+          createCollectionDto.isActive !== undefined
+            ? String(createCollectionDto.isActive) === 'true'
+            : true,
         slug,
         image: imageUrl,
       },
@@ -38,31 +43,38 @@ export class CollectionService {
     const collection = await this.prisma.collection.findUnique({
       where: { id },
     });
-    
+
     if (!collection) {
       throw new NotFoundException(`Collection with ID ${id} not found`);
     }
-    
+
     return collection;
   }
 
-  async update(id: string, updateCollectionDto: UpdateCollectionDto, file?: Express.Multer.File) {
+  async update(
+    id: string,
+    updateCollectionDto: UpdateCollectionDto,
+    file?: Express.Multer.File,
+  ) {
     const collection = await this.findOne(id);
-    
+
     let imageUrl = collection.image;
     if (file) {
       imageUrl = await this.minioService.uploadFile(file, 'collections');
     }
-    
-    const slug = updateCollectionDto.title 
-      ? slugify(updateCollectionDto.title, { lower: true }) 
+
+    const slug = updateCollectionDto.title
+      ? slugify(updateCollectionDto.title, { lower: true })
       : collection.slug;
 
     return this.prisma.collection.update({
       where: { id },
       data: {
         ...updateCollectionDto,
-        isActive: updateCollectionDto.isActive !== undefined ? String(updateCollectionDto.isActive) === 'true' : collection.isActive,
+        isActive:
+          updateCollectionDto.isActive !== undefined
+            ? String(updateCollectionDto.isActive) === 'true'
+            : collection.isActive,
         slug,
         image: imageUrl,
       },

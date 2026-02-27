@@ -14,9 +14,12 @@ export class ProductService {
     private minioService: MinioService,
   ) {}
 
-  async create(createProductDto: CreateProductDto, files: Express.Multer.File[]) {
+  async create(
+    createProductDto: CreateProductDto,
+    files: Express.Multer.File[],
+  ) {
     const slug = slugify(createProductDto.title, { lower: true });
-    
+
     // Upload images
     const imageUrls: string[] = [];
     if (files && files.length > 0) {
@@ -27,16 +30,17 @@ export class ProductService {
     }
 
     // Prepare collections connection
-    const collections = createProductDto.collectionIds?.map(id => ({ id })) || [];
+    const collections =
+      createProductDto.collectionIds?.map((id) => ({ id })) || [];
 
     // Parse specifications if string (from multipart form)
     let specs = createProductDto.specifications;
     if (typeof specs === 'string') {
-        try {
-            specs = JSON.parse(specs);
-        } catch (e) {
-            // keep as string or ignore
-        }
+      try {
+        specs = JSON.parse(specs);
+      } catch (e) {
+        // keep as string or ignore
+      }
     }
 
     return this.prisma.product.create({
@@ -57,13 +61,19 @@ export class ProductService {
         variants: true,
         category: true,
         collections: true,
-      }
+      },
     });
   }
 
-  async addVariant(productId: string, variantDto: CreateProductVariantDto, files: Express.Multer.File[]) {
+  async addVariant(
+    productId: string,
+    variantDto: CreateProductVariantDto,
+    files: Express.Multer.File[],
+  ) {
     // Verify product exists
-    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
     if (!product) throw new NotFoundException('Product not found');
 
     const imageUrls: string[] = [];
@@ -130,7 +140,7 @@ export class ProductService {
         // Sort by lowest variant price? Complex in Prisma without aggregate.
         // Simplification: sort by createdAt for now or raw query.
         // Prisma doesn't support easy sorting by related field aggregate yet.
-        orderBy.createdAt = 'desc'; 
+        orderBy.createdAt = 'desc';
         break;
       case 'price_desc':
         orderBy.createdAt = 'desc';
@@ -162,9 +172,9 @@ export class ProductService {
         collections: true,
         variants: true,
         reviews: {
-            include: { user: { select: { name: true } } },
-            orderBy: { createdAt: 'desc' }
-        }
+          include: { user: { select: { name: true } } },
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
 
