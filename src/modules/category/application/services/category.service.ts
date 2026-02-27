@@ -12,12 +12,9 @@ export class CategoryService {
     private minioService: MinioService,
   ) {}
 
-  async create(
-    createCategoryDto: CreateCategoryDto,
-    file?: Express.Multer.File,
-  ) {
+  async create(createCategoryDto: CreateCategoryDto, file?: Express.Multer.File) {
     const slug = slugify(createCategoryDto.title, { lower: true });
-
+    
     let imageUrl: string | undefined;
     if (file) {
       imageUrl = await this.minioService.uploadFile(file, 'categories');
@@ -48,28 +45,24 @@ export class CategoryService {
         parent: true,
       },
     });
-
+    
     if (!category) {
       throw new NotFoundException(`Category with ID ${id} not found`);
     }
-
+    
     return category;
   }
 
-  async update(
-    id: string,
-    updateCategoryDto: UpdateCategoryDto,
-    file?: Express.Multer.File,
-  ) {
+  async update(id: string, updateCategoryDto: UpdateCategoryDto, file?: Express.Multer.File) {
     const category = await this.findOne(id);
-
+    
     let imageUrl = category.image;
     if (file) {
       imageUrl = await this.minioService.uploadFile(file, 'categories');
     }
-
-    const slug = updateCategoryDto.title
-      ? slugify(updateCategoryDto.title, { lower: true })
+    
+    const slug = updateCategoryDto.title 
+      ? slugify(updateCategoryDto.title, { lower: true }) 
       : category.slug;
 
     return this.prisma.category.update({

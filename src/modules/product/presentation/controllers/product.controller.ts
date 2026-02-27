@@ -30,9 +30,9 @@ export class ProductController {
         title: { type: 'string' },
         description: { type: 'string' },
         categoryId: { type: 'string' },
-        'collectionIds[]': {
-          type: 'array',
-          items: { type: 'string' },
+        'collectionIds[]': { 
+            type: 'array',
+            items: { type: 'string' }
         },
         specifications: { type: 'string', description: 'JSON string' },
         metaTitle: { type: 'string' },
