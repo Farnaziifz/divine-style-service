@@ -7,10 +7,12 @@ import { CategoryModule } from './modules/category/category.module';
 import { CollectionModule } from './modules/collection/collection.module';
 import { ProductModule } from './modules/product/product.module';
 import { SpecificationModule } from './modules/specification/specification.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
     SharedModule,
+    AuthModule,
     UserModule,
     CategoryModule,
     CollectionModule,

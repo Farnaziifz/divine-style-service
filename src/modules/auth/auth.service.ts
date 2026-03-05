@@ -38,7 +38,8 @@ export class AuthService {
     // 5. Log code for dev environment
     console.log(`OTP for ${mobile}: ${code}`);
 
-    return { message: 'کد تایید ارسال شد', expiresAt };
+    // In dev mode, return the code for testing
+    return { message: 'کد تایید ارسال شد', expiresAt, code };
   }
 
   async verifyOtp(mobile: string, code: string) {
