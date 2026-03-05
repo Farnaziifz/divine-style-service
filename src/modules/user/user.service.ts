@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { UpdateUserDto } from './dtos/update-user.dto';
+import { PaginatedResult } from '../shared/interfaces/paginated-result.interface';
 
 @Injectable()
 export class UserService {
@@ -39,7 +40,7 @@ export class UserService {
     limit: number = 10,
     name?: string,
     mobile?: string,
-  ) {
+  ): Promise<PaginatedResult<any>> {
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -88,10 +89,12 @@ export class UserService {
 
     return {
       data,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
+      meta: {
+        total,
+        page,
+        lastPage: Math.ceil(total / limit),
+        limit,
+      },
     };
   }
 }

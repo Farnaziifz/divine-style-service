@@ -4,6 +4,8 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { Category } from '@prisma/client';
 import { CreateCategoryDto } from '../../presentation/dtos/create-category.dto';
 import { UpdateCategoryDto } from '../../presentation/dtos/update-category.dto';
+import { PaginationDto } from '../../../shared/dtos/pagination.dto';
+import { PaginatedResult } from '../../../shared/interfaces/paginated-result.interface';
 
 @Injectable()
 export class PrismaCategoryRepository implements ICategoryRepository {
@@ -21,8 +23,32 @@ export class PrismaCategoryRepository implements ICategoryRepository {
     });
   }
 
-  async findAll(): Promise<Category[]> {
-    return this.prisma.category.findMany({ include: { children: true } });
+  async findAll(
+    pagination?: PaginationDto,
+  ): Promise<PaginatedResult<Category>> {
+    const page = Number(pagination?.page) || 1;
+    const limit = Number(pagination?.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.category.findMany({
+        skip,
+        take: limit,
+        include: { children: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.category.count(),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        lastPage: Math.ceil(total / limit),
+        limit,
+      },
+    };
   }
 
   async findById(id: string): Promise<Category | null> {

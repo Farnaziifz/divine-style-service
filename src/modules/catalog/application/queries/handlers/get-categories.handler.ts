@@ -11,6 +11,6 @@ export class GetCategoriesHandler implements IQueryHandler<GetCategoriesQuery> {
   ) {}
 
   async execute(query: GetCategoriesQuery) {
-    return this.repository.findAll();
+    return this.repository.findAll(query.pagination);
   }
 }

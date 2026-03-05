@@ -7,9 +7,18 @@ import {
   Param,
   Delete,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  Query,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiConsumes,
+} from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { CreateCategoryDto } from '../dtos/create-category.dto';
 import { UpdateCategoryDto } from '../dtos/update-category.dto';
@@ -18,6 +27,8 @@ import { UpdateCategoryCommand } from '../../application/commands/update-categor
 import { DeleteCategoryCommand } from '../../application/commands/delete-category.command';
 import { GetCategoriesQuery } from '../../application/queries/get-categories.query';
 import { GetCategoryQuery } from '../../application/queries/get-category.query';
+import { MinioService } from '../../../shared/minio/minio.service';
+import { PaginationDto } from '../../../shared/dtos/pagination.dto';
 
 @ApiTags('Categories')
 @Controller('categories')
@@ -25,13 +36,23 @@ export class CategoryController {
   constructor(
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
+    private readonly minioService: MinioService,
   ) {}
 
   @Post()
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create category' })
-  create(@Body() createCategoryDto: CreateCategoryDto) {
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('image'))
+  async create(
+    @Body() createCategoryDto: CreateCategoryDto,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (file) {
+      const image = await this.minioService.uploadFile(file, 'categories');
+      createCategoryDto.image = image;
+    }
     return this.commandBus.execute(
       new CreateCategoryCommand(createCategoryDto),
     );
@@ -39,8 +60,8 @@ export class CategoryController {
 
   @Get()
   @ApiOperation({ summary: 'Get all categories' })
-  findAll() {
-    return this.queryBus.execute(new GetCategoriesQuery());
+  findAll(@Query() pagination: PaginationDto) {
+    return this.queryBus.execute(new GetCategoriesQuery(pagination));
   }
 
   @Get(':id')
@@ -53,10 +74,17 @@ export class CategoryController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update category' })
-  update(
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('image'))
+  async update(
     @Param('id') id: string,
     @Body() updateCategoryDto: UpdateCategoryDto,
+    @UploadedFile() file: Express.Multer.File,
   ) {
+    if (file) {
+      const image = await this.minioService.uploadFile(file, 'categories');
+      updateCategoryDto.image = image;
+    }
     return this.commandBus.execute(
       new UpdateCategoryCommand(id, updateCategoryDto),
     );

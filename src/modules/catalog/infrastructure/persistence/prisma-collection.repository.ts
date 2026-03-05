@@ -4,8 +4,8 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { Collection } from '@prisma/client';
 import { CreateCollectionDto } from '../../presentation/dtos/create-collection.dto';
 import { UpdateCollectionDto } from '../../presentation/dtos/update-collection.dto';
-import { PaginationDto } from '../../../../shared/dtos/pagination.dto';
-import { PaginatedResult } from '../../../../shared/interfaces/paginated-result.interface';
+import { PaginationDto } from '../../../shared/dtos/pagination.dto';
+import { PaginatedResult } from '../../../shared/interfaces/paginated-result.interface';
 
 @Injectable()
 export class PrismaCollectionRepository implements ICollectionRepository {
@@ -28,8 +28,8 @@ export class PrismaCollectionRepository implements ICollectionRepository {
   async findAll(
     pagination?: PaginationDto,
   ): Promise<PaginatedResult<Collection>> {
-    const page = pagination?.page || 1;
-    const limit = pagination?.limit || 10;
+    const page = Number(pagination?.page) || 1;
+    const limit = Number(pagination?.limit) || 10;
     const skip = (page - 1) * limit;
 
     const [data, total] = await Promise.all([
