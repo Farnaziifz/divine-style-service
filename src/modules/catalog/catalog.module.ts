@@ -37,10 +37,13 @@ import { GetProductHandler } from './application/queries/handlers/get-product.ha
 
 // Handlers - Specification
 import { CreateSpecificationKeyHandler } from './application/commands/handlers/create-specification-key.handler';
+import { UpdateSpecificationKeyHandler } from './application/commands/handlers/update-specification-key.handler';
+import { DeleteSpecificationKeyHandler } from './application/commands/handlers/delete-specification-key.handler';
 import { GetSpecificationKeysHandler } from './application/queries/handlers/get-specification-keys.handler';
 
 @Module({
   imports: [SharedModule, CqrsModule],
+  // Registered controllers
   controllers: [
     CollectionController,
     CategoryController,
@@ -79,6 +82,8 @@ import { GetSpecificationKeysHandler } from './application/queries/handlers/get-
 
     // Specification Handlers
     CreateSpecificationKeyHandler,
+    UpdateSpecificationKeyHandler,
+    DeleteSpecificationKeyHandler,
     GetSpecificationKeysHandler,
   ],
 })
