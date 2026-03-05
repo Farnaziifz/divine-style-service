@@ -31,4 +31,13 @@ export class UserController {
   updateProfile(@Req() req: any, @Body() updateUserDto: UpdateUserDto) {
     return this.userService.updateProfile(req.user.id, updateUserDto);
   }
+
+  @Get('list')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'دریافت لیست کاربران' })
+  @ApiResponse({ status: 200, description: 'لیست کاربران دریافت شد' })
+  findAll() {
+    return this.userService.findAll();
+  }
 }

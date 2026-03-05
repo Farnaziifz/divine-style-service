@@ -33,4 +33,46 @@ export class UserService {
     const { password, hashedRefreshToken, ...result } = user;
     return result;
   }
+
+  async findAll(page: number = 1, limit: number = 10) {
+    const skip = (page - 1) * limit;
+
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          _count: {
+            select: { orders: true },
+          },
+        },
+      }),
+      this.prisma.user.count(),
+    ]);
+
+    const data = users.map((user) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password, hashedRefreshToken, _count, ...result } = user;
+      return {
+        ...result,
+        hasPassword: !!password,
+        isProfileComplete: !!(
+          user.name &&
+          user.lastName &&
+          user.nationalCode &&
+          user.job
+        ),
+        ordersCount: _count.orders,
+      };
+    });
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
 }
