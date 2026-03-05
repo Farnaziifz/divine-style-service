@@ -178,4 +178,43 @@ export class AuthService {
       refreshToken,
     };
   }
+
+  async setPassword(userId: string, password: string) {
+    const salt = await bcrypt.genSalt();
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: hashedPassword,
+      },
+    });
+
+    return { message: 'رمز عبور با موفقیت تنظیم شد' };
+  }
+
+  async loginWithPassword(mobile: string, password: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { mobile },
+    });
+
+    if (!user || !user.password) {
+      throw new UnauthorizedException('شماره موبایل یا رمز عبور اشتباه است');
+    }
+
+    const passwordMatches = await bcrypt.compare(password, user.password);
+
+    if (!passwordMatches) {
+      throw new UnauthorizedException('شماره موبایل یا رمز عبور اشتباه است');
+    }
+
+    const tokens = await this.getTokens(user.id, user.mobile, user.role);
+    await this.updateRefreshToken(user.id, tokens.refreshToken);
+
+    return {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      user,
+    };
+  }
 }

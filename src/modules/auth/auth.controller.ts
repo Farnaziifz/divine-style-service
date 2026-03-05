@@ -10,6 +10,9 @@ import { SendOtpDto } from './dtos/send-otp.dto';
 import { VerifyOtpDto } from './dtos/verify-otp.dto';
 import { RefreshTokenGuard } from './refresh-token.guard';
 import { Request } from 'express';
+import { SetPasswordDto } from './dtos/set-password.dto';
+import { AuthGuard } from '@nestjs/passport';
+import { LoginDto } from './dtos/login.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -45,5 +48,29 @@ export class AuthController {
     const userId = req.user['sub'];
     const refreshToken = req.user['refreshToken'];
     return this.authService.refreshTokens(userId, refreshToken);
+  }
+
+  @Post('set-password')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'تنظیم رمز عبور برای کاربر جاری' })
+  @ApiResponse({ status: 200, description: 'رمز عبور با موفقیت تنظیم شد' })
+  @ApiResponse({ status: 401, description: 'عدم دسترسی (توکن نامعتبر)' })
+  async setPassword(@Req() req: any, @Body() setPasswordDto: SetPasswordDto) {
+    return this.authService.setPassword(req.user.id, setPasswordDto.password);
+  }
+
+  @Post('login')
+  @ApiOperation({ summary: 'ورود با شماره موبایل و رمز عبور' })
+  @ApiResponse({ status: 200, description: 'ورود موفق و دریافت توکن' })
+  @ApiResponse({
+    status: 401,
+    description: 'نام کاربری یا رمز عبور اشتباه است',
+  })
+  async login(@Body() loginDto: LoginDto) {
+    return this.authService.loginWithPassword(
+      loginDto.mobile,
+      loginDto.password,
+    );
   }
 }
