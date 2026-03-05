@@ -12,13 +12,27 @@ export class PrismaProductRepository implements IProductRepository {
   async create(
     data: CreateProductDto & { slug: string; images: string[] },
   ): Promise<Product> {
-    const { collectionIds, ...rest } = data;
+    const { collectionIds, variants, ...rest } = data;
     return this.prisma.product.create({
       data: {
         ...rest,
         collections: collectionIds
           ? {
               connect: collectionIds.map((id) => ({ id })),
+            }
+          : undefined,
+        variants: variants
+          ? {
+              create: variants.map((variant) => ({
+                sku: variant.sku,
+                size: variant.size,
+                color: variant.color,
+                colorCode: variant.colorCode,
+                price: variant.price,
+                discountPrice: variant.discountPrice,
+                stock: variant.stock,
+                specifications: variant.specifications ?? undefined,
+              })),
             }
           : undefined,
       },

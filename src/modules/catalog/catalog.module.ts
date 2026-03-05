@@ -6,7 +6,7 @@ import { SharedModule } from '../shared/shared.module';
 import { CollectionController } from './presentation/controllers/collection.controller';
 import { CategoryController } from './presentation/controllers/category.controller';
 import { ProductController } from './presentation/controllers/product.controller';
-import { SpecificationController } from './presentation/controllers/specification.controller';
+import { CatalogSpecificationController } from './presentation/controllers/catalog-specification.controller';
 
 // Repositories
 import { PrismaCollectionRepository } from './infrastructure/persistence/prisma-collection.repository';
@@ -48,7 +48,7 @@ import { GetSpecificationKeysHandler } from './application/queries/handlers/get-
     CollectionController,
     CategoryController,
     ProductController,
-    SpecificationController,
+    CatalogSpecificationController,
   ],
   providers: [
     { provide: 'ICollectionRepository', useClass: PrismaCollectionRepository },

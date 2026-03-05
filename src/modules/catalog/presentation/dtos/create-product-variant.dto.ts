@@ -4,6 +4,7 @@ import {
   IsString,
   IsNumber,
   Min,
+  IsObject,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -49,4 +50,9 @@ export class CreateProductVariantDto {
   @IsNumber()
   @Min(0)
   stock: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsObject()
+  specifications?: Record<string, any>;
 }

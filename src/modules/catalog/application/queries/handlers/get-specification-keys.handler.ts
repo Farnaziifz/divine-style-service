@@ -13,6 +13,6 @@ export class GetSpecificationKeysHandler
   ) {}
 
   async execute(query: GetSpecificationKeysQuery) {
-    return this.repository.findAll();
+    return this.repository.findAllKeys();
   }
 }

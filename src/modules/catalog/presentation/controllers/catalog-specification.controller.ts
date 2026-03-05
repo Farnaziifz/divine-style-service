@@ -20,7 +20,7 @@ import { GetSpecificationKeysQuery } from '../../application/queries/get-specifi
 
 @ApiTags('Specifications')
 @Controller('specifications')
-export class SpecificationController {
+export class CatalogSpecificationController {
   constructor(
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,

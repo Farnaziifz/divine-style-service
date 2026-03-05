@@ -5,8 +5,11 @@ import {
   IsArray,
   IsObject,
   IsUUID,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type, Transform } from 'class-transformer';
+import { CreateProductVariantDto } from './create-product-variant.dto';
 
 export class CreateProductDto {
   @ApiProperty()
@@ -45,5 +48,20 @@ export class CreateProductDto {
   @IsString()
   metaDescription?: string;
 
-  // Note: Images are handled via file upload in controller
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return [];
+      }
+    }
+    return value;
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductVariantDto)
+  variants?: CreateProductVariantDto[];
 }

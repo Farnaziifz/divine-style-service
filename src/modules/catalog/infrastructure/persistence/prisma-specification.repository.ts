@@ -30,6 +30,7 @@ export class PrismaSpecificationRepository implements ISpecificationRepository {
     id: string,
     data: UpdateSpecificationKeyDto,
   ): Promise<SpecificationKey> {
+    console.log('Repository: updateKey', id, data);
     return this.prisma.specificationKey.update({
       where: { id },
       data: {

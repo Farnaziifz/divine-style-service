@@ -160,6 +160,9 @@ model ProductVariant {
   // Media specific to variant (e.g. Red shirt image)
   images String[]
 
+  // Variant specific specifications (e.g. Waist size for this size)
+  specifications Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   isDeleted Boolean  @default(false)

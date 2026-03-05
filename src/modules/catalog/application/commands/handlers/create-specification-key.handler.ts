@@ -13,6 +13,6 @@ export class CreateSpecificationKeyHandler
   ) {}
 
   async execute(command: CreateSpecificationKeyCommand) {
-    return this.repository.create(command.dto);
+    return this.repository.createKey(command.dto);
   }
 }
