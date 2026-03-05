@@ -1,6 +1,11 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
@@ -15,14 +20,33 @@ export class AuthService {
       throw new BadRequestException('شماره موبایل نامعتبر است');
     }
 
-    // 2. Generate 5 digit code
+    // 2. Check for existing valid OTP
+    const existingOtp = await this.prisma.otp.findFirst({
+      where: {
+        mobile,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+    });
+
+    if (existingOtp) {
+      const remainingTime = Math.ceil(
+        (existingOtp.expiresAt.getTime() - Date.now()) / 1000,
+      );
+      throw new BadRequestException(
+        `کد تایید قبلی هنوز معتبر است. لطفا ${remainingTime} ثانیه دیگر صبر کنید.`,
+      );
+    }
+
+    // 3. Generate 5 digit code
     const code = Math.floor(10000 + Math.random() * 90000).toString();
 
-    // 3. Set expiration (2 minutes)
+    // 4. Set expiration (2 minutes)
     const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
 
-    // 4. Save to Otp table
-    // Delete existing OTPs for this mobile to avoid clutter (Optional but good for clean up)
+    // 5. Save to Otp table
+    // Delete expired OTPs for this mobile to avoid clutter
     await this.prisma.otp.deleteMany({
       where: { mobile },
     });
@@ -35,7 +59,7 @@ export class AuthService {
       },
     });
 
-    // 5. Log code for dev environment
+    // 6. Log code for dev environment
     console.log(`OTP for ${mobile}: ${code}`);
 
     // In dev mode, return the code for testing
@@ -71,9 +95,9 @@ export class AuthService {
       });
     }
 
-    // 3. Generate Token
-    const payload = { sub: user.id, mobile: user.mobile, role: user.role };
-    const accessToken = this.jwtService.sign(payload);
+    // 3. Generate Tokens
+    const tokens = await this.getTokens(user.id, user.mobile, user.role);
+    await this.updateRefreshToken(user.id, tokens.refreshToken);
 
     // 4. Delete OTP (Consumed)
     await this.prisma.otp.delete({
@@ -81,8 +105,77 @@ export class AuthService {
     });
 
     return {
-      accessToken,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
       user,
+    };
+  }
+
+  async refreshTokens(userId: string, refreshToken: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user || !user.hashedRefreshToken) {
+      throw new UnauthorizedException('Access Denied');
+    }
+
+    const refreshTokenMatches = await bcrypt.compare(
+      refreshToken,
+      user.hashedRefreshToken,
+    );
+
+    if (!refreshTokenMatches) {
+      throw new UnauthorizedException('Access Denied');
+    }
+
+    const tokens = await this.getTokens(user.id, user.mobile, user.role);
+    await this.updateRefreshToken(user.id, tokens.refreshToken);
+
+    return tokens;
+  }
+
+  async updateRefreshToken(userId: string, refreshToken: string) {
+    const salt = await bcrypt.genSalt();
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, salt);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        hashedRefreshToken,
+      },
+    });
+  }
+
+  async getTokens(userId: string, mobile: string, role: string) {
+    const [accessToken, refreshToken] = await Promise.all([
+      this.jwtService.signAsync(
+        {
+          sub: userId,
+          mobile,
+          role,
+        },
+        {
+          secret: 'secretKey', // TODO: Use env variable
+          expiresIn: '15m',
+        },
+      ),
+      this.jwtService.signAsync(
+        {
+          sub: userId,
+          mobile,
+          role,
+        },
+        {
+          secret: 'refreshSecretKey', // TODO: Use env variable
+          expiresIn: '7d',
+        },
+      ),
+    ]);
+
+    return {
+      accessToken,
+      refreshToken,
     };
   }
 }

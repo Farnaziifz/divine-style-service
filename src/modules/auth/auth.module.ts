@@ -5,17 +5,11 @@ import { SharedModule } from '../shared/shared.module';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './jwt.strategy';
+import { RefreshTokenStrategy } from './refresh-token.strategy';
 
 @Module({
-  imports: [
-    SharedModule,
-    PassportModule,
-    JwtModule.register({
-      secret: 'secretKey', // TODO: Use env variable
-      signOptions: { expiresIn: '7d' },
-    }),
-  ],
-  providers: [AuthService, JwtStrategy],
+  imports: [SharedModule, PassportModule, JwtModule.register({})],
+  providers: [AuthService, JwtStrategy, RefreshTokenStrategy],
   controllers: [AuthController],
   exports: [AuthService],
 })

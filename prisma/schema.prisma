@@ -22,6 +22,7 @@ model User {
   password     String?   // Optional because initial login might be OTP only
   job          String?
   role         Role      @default(USER)
+  hashedRefreshToken String? // For Refresh Token mechanism
   reviews      ProductReview[]
   orders       Order[]
   createdAt    DateTime  @default(now())
