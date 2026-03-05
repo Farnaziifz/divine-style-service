@@ -1,0 +1,74 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  Query,
+} from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { CommandBus, QueryBus } from '@nestjs/cqrs';
+import { CreateCollectionDto } from '../dtos/create-collection.dto';
+import { UpdateCollectionDto } from '../dtos/update-collection.dto';
+import { AuthGuard } from '@nestjs/passport';
+import { CreateCollectionCommand } from '../../application/commands/create-collection.command';
+import { UpdateCollectionCommand } from '../../application/commands/update-collection.command';
+import { DeleteCollectionCommand } from '../../application/commands/delete-collection.command';
+import { GetCollectionsQuery } from '../../application/queries/get-collections.query';
+import { GetCollectionQuery } from '../../application/queries/get-collection.query';
+import { PaginationDto } from '../../../shared/dtos/pagination.dto';
+
+@ApiTags('Collections')
+@Controller('collections')
+export class CollectionController {
+  constructor(
+    private readonly commandBus: CommandBus,
+    private readonly queryBus: QueryBus,
+  ) {}
+
+  @Post()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create collection' })
+  create(@Body() createCollectionDto: CreateCollectionDto) {
+    return this.commandBus.execute(
+      new CreateCollectionCommand(createCollectionDto),
+    );
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'Get all collections' })
+  findAll(@Query() pagination: PaginationDto) {
+    return this.queryBus.execute(new GetCollectionsQuery(pagination));
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get collection by id' })
+  findOne(@Param('id') id: string) {
+    return this.queryBus.execute(new GetCollectionQuery(id));
+  }
+
+  @Patch(':id')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update collection' })
+  update(
+    @Param('id') id: string,
+    @Body() updateCollectionDto: UpdateCollectionDto,
+  ) {
+    return this.commandBus.execute(
+      new UpdateCollectionCommand(id, updateCollectionDto),
+    );
+  }
+
+  @Delete(':id')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete collection' })
+  remove(@Param('id') id: string) {
+    return this.commandBus.execute(new DeleteCollectionCommand(id));
+  }
+}

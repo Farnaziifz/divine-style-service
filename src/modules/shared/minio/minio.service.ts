@@ -2,12 +2,14 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
   S3Client,
   PutObjectCommand,
+  GetObjectCommand,
   CreateBucketCommand,
   HeadBucketCommand,
 } from '@aws-sdk/client-s3';
 import { ConfigService } from '@nestjs/config';
 import { v4 as uuidv4 } from 'uuid';
 import { extname } from 'path';
+import { Readable } from 'stream';
 
 @Injectable()
 export class MinioService implements OnModuleInit {
@@ -82,18 +84,28 @@ export class MinioService implements OnModuleInit {
         }),
       );
 
-      const endpoint = this.configService.get<string>(
-        'MINIO_ENDPOINT',
-        'http://127.0.0.1:9000',
-      );
-      // Ensure endpoint doesn't end with slash
-      const cleanEndpoint = endpoint.endsWith('/')
-        ? endpoint.slice(0, -1)
-        : endpoint;
-
-      return `${cleanEndpoint}/${this.bucketName}/${fileName}`;
+      return `/upload/${fileName}`;
     } catch (error) {
       this.logger.error(`Failed to upload file: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async getFileStream(
+    key: string,
+  ): Promise<{ stream: Readable; contentType: string }> {
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+      });
+      const response = await this.s3Client.send(command);
+      return {
+        stream: response.Body as Readable,
+        contentType: response.ContentType,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get file: ${error.message}`);
       throw error;
     }
   }

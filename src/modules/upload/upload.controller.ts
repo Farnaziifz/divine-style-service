@@ -1,11 +1,16 @@
 import {
   Controller,
   Post,
+  Get,
+  Param,
+  Res,
+  StreamableFile,
   UseInterceptors,
   UploadedFile,
   UseGuards,
   BadRequestException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
@@ -56,5 +61,24 @@ export class UploadController {
     }
     const url = await this.minioService.uploadFile(file, 'uploads');
     return { url };
+  }
+
+  @Get(':folder/:filename')
+  @ApiOperation({ summary: 'دریافت فایل' })
+  async getFile(
+    @Param('folder') folder: string,
+    @Param('filename') filename: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const key = `${folder}/${filename}`;
+    // TODO: Validate folder/filename to prevent traversal attacks
+    // But MinIO key logic is simple.
+    
+    // Check if MinioService method returns Readable
+    const { stream, contentType } = await this.minioService.getFileStream(key);
+    res.set({
+      'Content-Type': contentType,
+    });
+    return new StreamableFile(stream);
   }
 }

@@ -27,6 +27,8 @@ model User {
   orders       Order[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+  isDeleted    Boolean   @default(false)
+  deletedAt    DateTime?
 }
 
 model Otp {
@@ -58,6 +60,8 @@ model Category {
   products    Product[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
 }
 
 model Collection {
@@ -70,6 +74,8 @@ model Collection {
   isActive    Boolean   @default(true)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
 }
 
 // Dynamic Specifications (e.g., Fabric, Care, Origin)
@@ -81,6 +87,8 @@ model SpecificationKey {
   options   String[] // For SELECT type
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
 }
 
 enum SpecType {
@@ -128,6 +136,8 @@ model Product {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
 }
 
 model ProductVariant {
@@ -152,6 +162,8 @@ model ProductVariant {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
 }
 
 model ProductReview {
@@ -168,6 +180,8 @@ model ProductReview {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
 }
 
 // Placeholder for Order
@@ -177,4 +191,6 @@ model Order {
   user      User     @relation(fields: [userId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
 }

@@ -8,7 +8,9 @@ async function bootstrap() {
   app.enableCors({
     origin: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type, Accept, Authorization',
     credentials: true,
+    maxAge: 3600,
   });
 
   const config = new DocumentBuilder()
