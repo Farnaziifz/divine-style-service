@@ -8,12 +8,14 @@ import {
   Delete,
   UseInterceptors,
   UploadedFile,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { CollectionService } from '../../application/services/collection.service';
 import { CreateCollectionDto } from '../dtos/create-collection.dto';
 import { UpdateCollectionDto } from '../dtos/update-collection.dto';
+import { AuthGuard } from '@nestjs/passport';
 
 @ApiTags('Collections')
 @Controller('collections')
@@ -21,27 +23,10 @@ export class CollectionController {
   constructor(private readonly collectionService: CollectionService) {}
 
   @Post()
-  @UseInterceptors(FileInterceptor('image'))
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string' },
-        description: { type: 'string' },
-        isActive: { type: 'boolean' },
-        image: {
-          type: 'string',
-          format: 'binary',
-        },
-      },
-    },
-  })
-  create(
-    @Body() createCollectionDto: CreateCollectionDto,
-    @UploadedFile() file?: Express.Multer.File,
-  ) {
-    return this.collectionService.create(createCollectionDto, file);
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  create(@Body() createCollectionDto: CreateCollectionDto) {
+    return this.collectionService.create(createCollectionDto);
   }
 
   @Get()
@@ -55,31 +40,18 @@ export class CollectionController {
   }
 
   @Patch(':id')
-  @UseInterceptors(FileInterceptor('image'))
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string' },
-        description: { type: 'string' },
-        isActive: { type: 'boolean' },
-        image: {
-          type: 'string',
-          format: 'binary',
-        },
-      },
-    },
-  })
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
   update(
     @Param('id') id: string,
     @Body() updateCollectionDto: UpdateCollectionDto,
-    @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.collectionService.update(id, updateCollectionDto, file);
+    return this.collectionService.update(id, updateCollectionDto);
   }
 
   @Delete(':id')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
   remove(@Param('id') id: string) {
     return this.collectionService.remove(id);
   }

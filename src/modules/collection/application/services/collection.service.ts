@@ -1,36 +1,23 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
-import { MinioService } from '../../../shared/minio/minio.service';
 import { CreateCollectionDto } from '../../presentation/dtos/create-collection.dto';
 import { UpdateCollectionDto } from '../../presentation/dtos/update-collection.dto';
 import slugify from 'slugify';
 
 @Injectable()
 export class CollectionService {
-  constructor(
-    private prisma: PrismaService,
-    private minioService: MinioService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
-  async create(
-    createCollectionDto: CreateCollectionDto,
-    file?: Express.Multer.File,
-  ) {
+  async create(createCollectionDto: CreateCollectionDto) {
     const slug = slugify(createCollectionDto.title, { lower: true });
-    let imageUrl: string | undefined;
-    if (file) {
-      imageUrl = await this.minioService.uploadFile(file, 'collections');
-    }
 
     return this.prisma.collection.create({
       data: {
-        ...createCollectionDto,
-        isActive:
-          createCollectionDto.isActive !== undefined
-            ? String(createCollectionDto.isActive) === 'true'
-            : true,
+        title: createCollectionDto.title,
+        description: createCollectionDto.description,
+        isActive: createCollectionDto.isActive ?? true,
         slug,
-        image: imageUrl,
+        image: createCollectionDto.image,
       },
     });
   }
@@ -51,17 +38,8 @@ export class CollectionService {
     return collection;
   }
 
-  async update(
-    id: string,
-    updateCollectionDto: UpdateCollectionDto,
-    file?: Express.Multer.File,
-  ) {
+  async update(id: string, updateCollectionDto: UpdateCollectionDto) {
     const collection = await this.findOne(id);
-
-    let imageUrl = collection.image;
-    if (file) {
-      imageUrl = await this.minioService.uploadFile(file, 'collections');
-    }
 
     const slug = updateCollectionDto.title
       ? slugify(updateCollectionDto.title, { lower: true })
@@ -70,13 +48,11 @@ export class CollectionService {
     return this.prisma.collection.update({
       where: { id },
       data: {
-        ...updateCollectionDto,
-        isActive:
-          updateCollectionDto.isActive !== undefined
-            ? String(updateCollectionDto.isActive) === 'true'
-            : collection.isActive,
+        title: updateCollectionDto.title,
+        description: updateCollectionDto.description,
+        isActive: updateCollectionDto.isActive,
         slug,
-        image: imageUrl,
+        image: updateCollectionDto.image,
       },
     });
   }

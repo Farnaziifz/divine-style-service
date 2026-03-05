@@ -6,6 +6,7 @@ import {
   UseGuards,
   Req,
   Query,
+  Param,
 } from '@nestjs/common';
 import { UserService } from './user.service';
 import { UpdateUserDto } from './dtos/update-user.dto';
@@ -57,5 +58,14 @@ export class UserController {
     @Query('mobile') mobile?: string,
   ) {
     return this.userService.findAll(Number(page), Number(limit), name, mobile);
+  }
+
+  @Get(':id')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'دریافت جزئیات کاربر' })
+  @ApiResponse({ status: 200, description: 'جزئیات کاربر دریافت شد' })
+  findOne(@Param('id') id: string) {
+    return this.userService.getProfile(id);
   }
 }

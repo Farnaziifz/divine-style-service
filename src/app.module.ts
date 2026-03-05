@@ -8,6 +8,7 @@ import { CollectionModule } from './modules/collection/collection.module';
 import { ProductModule } from './modules/product/product.module';
 import { SpecificationModule } from './modules/specification/specification.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { UploadModule } from './modules/upload/upload.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AuthModule } from './modules/auth/auth.module';
     CollectionModule,
     ProductModule,
     SpecificationModule,
+    UploadModule,
   ],
   controllers: [AppController],
   providers: [AppService],

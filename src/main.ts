@@ -16,6 +16,7 @@ async function bootstrap() {
     .setDescription('The Divine API description')
     .setVersion('1.0')
     .addTag('divine')
+    .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
