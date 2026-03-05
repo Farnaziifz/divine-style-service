@@ -1,4 +1,12 @@
-import { Controller, Get, Put, Body, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Put,
+  Body,
+  UseGuards,
+  Req,
+  Query,
+} from '@nestjs/common';
 import { UserService } from './user.service';
 import { UpdateUserDto } from './dtos/update-user.dto';
 import { AuthGuard } from '@nestjs/passport';
@@ -7,6 +15,7 @@ import {
   ApiOperation,
   ApiResponse,
   ApiTags,
+  ApiQuery,
 } from '@nestjs/swagger';
 
 @ApiTags('User')
@@ -36,8 +45,17 @@ export class UserController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'دریافت لیست کاربران' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'name', required: false, type: String })
+  @ApiQuery({ name: 'mobile', required: false, type: String })
   @ApiResponse({ status: 200, description: 'لیست کاربران دریافت شد' })
-  findAll() {
-    return this.userService.findAll();
+  findAll(
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+    @Query('name') name?: string,
+    @Query('mobile') mobile?: string,
+  ) {
+    return this.userService.findAll(Number(page), Number(limit), name, mobile);
   }
 }

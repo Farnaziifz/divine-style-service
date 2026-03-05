@@ -34,11 +34,30 @@ export class UserService {
     return result;
   }
 
-  async findAll(page: number = 1, limit: number = 10) {
+  async findAll(
+    page: number = 1,
+    limit: number = 10,
+    name?: string,
+    mobile?: string,
+  ) {
     const skip = (page - 1) * limit;
+
+    const where: any = {};
+
+    if (name) {
+      where.OR = [
+        { name: { contains: name, mode: 'insensitive' } },
+        { lastName: { contains: name, mode: 'insensitive' } },
+      ];
+    }
+
+    if (mobile) {
+      where.mobile = { contains: mobile };
+    }
 
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
+        where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -48,7 +67,7 @@ export class UserService {
           },
         },
       }),
-      this.prisma.user.count(),
+      this.prisma.user.count({ where }),
     ]);
 
     const data = users.map((user) => {
