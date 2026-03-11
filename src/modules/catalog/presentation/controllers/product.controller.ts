@@ -8,16 +8,12 @@ import {
   Delete,
   UseGuards,
   Query,
-  UseInterceptors,
-  UploadedFiles,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import {
   ApiTags,
   ApiBearerAuth,
   ApiOperation,
-  ApiConsumes,
 } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { CreateProductDto } from '../dtos/create-product.dto';
@@ -43,21 +39,11 @@ export class ProductController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create product' })
-  @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FilesInterceptor('images'))
   async create(
     @Body() createProductDto: CreateProductDto,
-    @UploadedFiles() files: Array<Express.Multer.File>,
   ) {
-    const images: string[] = [];
-    if (files && files.length > 0) {
-      for (const file of files) {
-        const url = await this.minioService.uploadFile(file, 'products');
-        images.push(url);
-      }
-    }
     return this.commandBus.execute(
-      new CreateProductCommand(createProductDto, images),
+      new CreateProductCommand(createProductDto, createProductDto.images),
     );
   }
 
@@ -77,25 +63,15 @@ export class ProductController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update product' })
-  @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FilesInterceptor('images'))
   async update(
     @Param('id') id: string,
     @Body() updateProductDto: UpdateProductDto,
-    @UploadedFiles() files: Array<Express.Multer.File>,
   ) {
-    const images: string[] = [];
-    if (files && files.length > 0) {
-      for (const file of files) {
-        const url = await this.minioService.uploadFile(file, 'products');
-        images.push(url);
-      }
-    }
     return this.commandBus.execute(
       new UpdateProductCommand(
         id,
         updateProductDto,
-        images.length > 0 ? images : undefined,
+        updateProductDto.images,
       ),
     );
   }

@@ -4,6 +4,7 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { Product } from '@prisma/client';
 import { CreateProductDto } from '../../presentation/dtos/create-product.dto';
 import { ProductFilterDto } from '../../presentation/dtos/product-filter.dto';
+import { PaginatedResult } from '../../../shared/interfaces/paginated-result.interface';
 
 @Injectable()
 export class PrismaProductRepository implements IProductRepository {
@@ -39,7 +40,11 @@ export class PrismaProductRepository implements IProductRepository {
     });
   }
 
-  async findAll(filter?: ProductFilterDto): Promise<Product[]> {
+  async findAll(filter?: ProductFilterDto): Promise<PaginatedResult<Product>> {
+    const page = Number(filter?.page) || 1;
+    const limit = Number(filter?.limit) || 10;
+    const skip = (page - 1) * limit;
+
     const where: any = {};
 
     if (filter?.search) {
@@ -78,15 +83,30 @@ export class PrismaProductRepository implements IProductRepository {
       orderBy.createdAt = 'desc';
     }
 
-    return this.prisma.product.findMany({
-      where,
-      orderBy,
-      include: {
-        category: true,
-        collections: true,
-        variants: true,
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.product.count({ where }),
+      this.prisma.product.findMany({
+        where,
+        orderBy,
+        skip,
+        take: limit,
+        include: {
+          category: true,
+          collections: true,
+          variants: true,
+        },
+      }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        lastPage: Math.ceil(total / limit),
       },
-    });
+    };
   }
 
   async findById(id: string): Promise<Product | null> {
@@ -112,12 +132,28 @@ export class PrismaProductRepository implements IProductRepository {
   }
 
   async update(id: string, data: any): Promise<Product> {
-    const { collectionIds, ...rest } = data;
+    const { collectionIds, variants, ...rest } = data;
     const updateData: any = { ...rest };
 
     if (collectionIds) {
       updateData.collections = {
         set: collectionIds.map((id: string) => ({ id })),
+      };
+    }
+
+    if (variants) {
+      updateData.variants = {
+        deleteMany: {},
+        create: variants.map((variant: any) => ({
+          sku: variant.sku,
+          size: variant.size,
+          color: variant.color,
+          colorCode: variant.colorCode,
+          price: variant.price,
+          discountPrice: variant.discountPrice,
+          stock: variant.stock,
+          specifications: variant.specifications ?? undefined,
+        })),
       };
     }
 

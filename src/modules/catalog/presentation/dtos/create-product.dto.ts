@@ -8,7 +8,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type, Transform } from 'class-transformer';
+import { Type } from 'class-transformer';
 import { CreateProductVariantDto } from './create-product-variant.dto';
 
 export class CreateProductDto {
@@ -48,18 +48,13 @@ export class CreateProductDto {
   @IsString()
   metaDescription?: string;
 
+  @ApiProperty()
+  @IsArray()
+  @IsString({ each: true })
+  images: string[];
+
   @ApiPropertyOptional()
   @IsOptional()
-  @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      try {
-        return JSON.parse(value);
-      } catch {
-        return [];
-      }
-    }
-    return value;
-  })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateProductVariantDto)
