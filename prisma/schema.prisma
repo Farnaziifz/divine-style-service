@@ -155,6 +155,7 @@ model ProductVariant {
   // Pricing & Inventory
   price         Decimal  @db.Decimal(10, 2)
   discountPrice Decimal? @db.Decimal(10, 2)
+  discountPercent Int?
   stock         Int      @default(0)
 
   // Media specific to variant (e.g. Red shirt image)

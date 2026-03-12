@@ -25,12 +25,21 @@ export class PrismaProductRepository implements IProductRepository {
         variants: variants
           ? {
               create: variants.map((variant) => ({
+                discountPercent: variant.discountPercent ?? undefined,
                 sku: variant.sku,
                 size: variant.size,
                 color: variant.color,
                 colorCode: variant.colorCode,
                 price: variant.price,
-                discountPrice: variant.discountPrice,
+                discountPrice:
+                  typeof variant.discountPercent === 'number' &&
+                  variant.discountPercent > 0
+                    ? Math.round(
+                        ((variant.price * (100 - variant.discountPercent)) /
+                          100) *
+                          100,
+                      ) / 100
+                    : variant.discountPrice,
                 stock: variant.stock,
                 specifications: variant.specifications ?? undefined,
               })),
@@ -150,7 +159,15 @@ export class PrismaProductRepository implements IProductRepository {
           color: variant.color,
           colorCode: variant.colorCode,
           price: variant.price,
-          discountPrice: variant.discountPrice,
+          discountPercent: variant.discountPercent ?? undefined,
+          discountPrice:
+            typeof variant.discountPercent === 'number' &&
+            variant.discountPercent > 0
+              ? Math.round(
+                  ((variant.price * (100 - variant.discountPercent)) / 100) *
+                    100,
+                ) / 100
+              : variant.discountPrice,
           stock: variant.stock,
           specifications: variant.specifications ?? undefined,
         })),
