@@ -4,9 +4,7 @@ import { ICollectionRepository } from '../../../domain/repositories/collection.r
 import { Inject } from '@nestjs/common';
 
 @QueryHandler(GetCollectionsQuery)
-export class GetCollectionsHandler
-  implements IQueryHandler<GetCollectionsQuery>
-{
+export class GetCollectionsHandler implements IQueryHandler<GetCollectionsQuery> {
   constructor(
     @Inject('ICollectionRepository')
     private readonly repository: ICollectionRepository,

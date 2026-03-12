@@ -5,9 +5,7 @@ import { Inject } from '@nestjs/common';
 import slugify from 'slugify';
 
 @CommandHandler(CreateProductCommand)
-export class CreateProductHandler
-  implements ICommandHandler<CreateProductCommand>
-{
+export class CreateProductHandler implements ICommandHandler<CreateProductCommand> {
   constructor(
     @Inject('IProductRepository')
     private readonly repository: IProductRepository,

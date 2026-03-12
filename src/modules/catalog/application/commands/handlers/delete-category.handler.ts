@@ -4,9 +4,7 @@ import { ICategoryRepository } from '../../../domain/repositories/category.repos
 import { Inject, NotFoundException } from '@nestjs/common';
 
 @CommandHandler(DeleteCategoryCommand)
-export class DeleteCategoryHandler
-  implements ICommandHandler<DeleteCategoryCommand>
-{
+export class DeleteCategoryHandler implements ICommandHandler<DeleteCategoryCommand> {
   constructor(
     @Inject('ICategoryRepository')
     private readonly repository: ICategoryRepository,

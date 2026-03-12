@@ -73,7 +73,7 @@ export class UploadController {
     const key = `${folder}/${filename}`;
     // TODO: Validate folder/filename to prevent traversal attacks
     // But MinIO key logic is simple.
-    
+
     // Check if MinioService method returns Readable
     const { stream, contentType } = await this.minioService.getFileStream(key);
     res.set({

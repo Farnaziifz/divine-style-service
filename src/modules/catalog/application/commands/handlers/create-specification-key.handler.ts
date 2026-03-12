@@ -4,9 +4,7 @@ import { ISpecificationRepository } from '../../../domain/repositories/specifica
 import { Inject } from '@nestjs/common';
 
 @CommandHandler(CreateSpecificationKeyCommand)
-export class CreateSpecificationKeyHandler
-  implements ICommandHandler<CreateSpecificationKeyCommand>
-{
+export class CreateSpecificationKeyHandler implements ICommandHandler<CreateSpecificationKeyCommand> {
   constructor(
     @Inject('ISpecificationRepository')
     private readonly repository: ISpecificationRepository,

@@ -4,15 +4,13 @@ import { ISpecificationRepository } from '../../../domain/repositories/specifica
 import { Inject } from '@nestjs/common';
 
 @QueryHandler(GetSpecificationKeysQuery)
-export class GetSpecificationKeysHandler
-  implements IQueryHandler<GetSpecificationKeysQuery>
-{
+export class GetSpecificationKeysHandler implements IQueryHandler<GetSpecificationKeysQuery> {
   constructor(
     @Inject('ISpecificationRepository')
     private readonly repository: ISpecificationRepository,
   ) {}
 
-  async execute(query: GetSpecificationKeysQuery) {
+  async execute() {
     return this.repository.findAllKeys();
   }
 }

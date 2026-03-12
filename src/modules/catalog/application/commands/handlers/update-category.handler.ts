@@ -5,9 +5,7 @@ import { Inject, NotFoundException } from '@nestjs/common';
 import slugify from 'slugify';
 
 @CommandHandler(UpdateCategoryCommand)
-export class UpdateCategoryHandler
-  implements ICommandHandler<UpdateCategoryCommand>
-{
+export class UpdateCategoryHandler implements ICommandHandler<UpdateCategoryCommand> {
   constructor(
     @Inject('ICategoryRepository')
     private readonly repository: ICategoryRepository,

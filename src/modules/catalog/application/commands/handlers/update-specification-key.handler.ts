@@ -4,9 +4,7 @@ import { UpdateSpecificationKeyCommand } from '../update-specification-key.comma
 import { ISpecificationRepository } from '../../../domain/repositories/specification.repository.interface';
 
 @CommandHandler(UpdateSpecificationKeyCommand)
-export class UpdateSpecificationKeyHandler
-  implements ICommandHandler<UpdateSpecificationKeyCommand>
-{
+export class UpdateSpecificationKeyHandler implements ICommandHandler<UpdateSpecificationKeyCommand> {
   constructor(
     @Inject('ISpecificationRepository')
     private readonly repository: ISpecificationRepository,

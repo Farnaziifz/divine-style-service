@@ -10,11 +10,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
-import {
-  ApiTags,
-  ApiBearerAuth,
-  ApiOperation,
-} from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { CreateProductDto } from '../dtos/create-product.dto';
 import { UpdateProductDto } from '../dtos/update-product.dto';
@@ -39,9 +35,7 @@ export class ProductController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create product' })
-  async create(
-    @Body() createProductDto: CreateProductDto,
-  ) {
+  async create(@Body() createProductDto: CreateProductDto) {
     return this.commandBus.execute(
       new CreateProductCommand(createProductDto, createProductDto.images),
     );
@@ -68,11 +62,7 @@ export class ProductController {
     @Body() updateProductDto: UpdateProductDto,
   ) {
     return this.commandBus.execute(
-      new UpdateProductCommand(
-        id,
-        updateProductDto,
-        updateProductDto.images,
-      ),
+      new UpdateProductCommand(id, updateProductDto, updateProductDto.images),
     );
   }
 

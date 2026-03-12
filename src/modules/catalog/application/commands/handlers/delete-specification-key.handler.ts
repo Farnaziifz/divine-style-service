@@ -4,9 +4,7 @@ import { DeleteSpecificationKeyCommand } from '../delete-specification-key.comma
 import { ISpecificationRepository } from '../../../domain/repositories/specification.repository.interface';
 
 @CommandHandler(DeleteSpecificationKeyCommand)
-export class DeleteSpecificationKeyHandler
-  implements ICommandHandler<DeleteSpecificationKeyCommand>
-{
+export class DeleteSpecificationKeyHandler implements ICommandHandler<DeleteSpecificationKeyCommand> {
   constructor(
     @Inject('ISpecificationRepository')
     private readonly repository: ISpecificationRepository,

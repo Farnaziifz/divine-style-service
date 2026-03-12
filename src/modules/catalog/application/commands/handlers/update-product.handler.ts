@@ -5,9 +5,7 @@ import { Inject, NotFoundException } from '@nestjs/common';
 import slugify from 'slugify';
 
 @CommandHandler(UpdateProductCommand)
-export class UpdateProductHandler
-  implements ICommandHandler<UpdateProductCommand>
-{
+export class UpdateProductHandler implements ICommandHandler<UpdateProductCommand> {
   constructor(
     @Inject('IProductRepository')
     private readonly repository: IProductRepository,
@@ -20,9 +18,7 @@ export class UpdateProductHandler
       throw new NotFoundException(`Product with ID ${id} not found`);
     }
 
-    const slug = dto.title
-      ? slugify(dto.title, { lower: true })
-      : product.slug;
+    const slug = dto.title ? slugify(dto.title, { lower: true }) : product.slug;
 
     const updateData: any = { ...dto, slug };
     if (images) {

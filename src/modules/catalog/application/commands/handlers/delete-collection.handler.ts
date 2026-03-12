@@ -4,9 +4,7 @@ import { ICollectionRepository } from '../../../domain/repositories/collection.r
 import { Inject, NotFoundException } from '@nestjs/common';
 
 @CommandHandler(DeleteCollectionCommand)
-export class DeleteCollectionHandler
-  implements ICommandHandler<DeleteCollectionCommand>
-{
+export class DeleteCollectionHandler implements ICommandHandler<DeleteCollectionCommand> {
   constructor(
     @Inject('ICollectionRepository')
     private readonly repository: ICollectionRepository,

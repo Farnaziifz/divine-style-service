@@ -5,9 +5,7 @@ import { Inject } from '@nestjs/common';
 import slugify from 'slugify';
 
 @CommandHandler(CreateCollectionCommand)
-export class CreateCollectionHandler
-  implements ICommandHandler<CreateCollectionCommand>
-{
+export class CreateCollectionHandler implements ICommandHandler<CreateCollectionCommand> {
   constructor(
     @Inject('ICollectionRepository')
     private readonly repository: ICollectionRepository,

@@ -5,9 +5,7 @@ import { Inject } from '@nestjs/common';
 import slugify from 'slugify';
 
 @CommandHandler(CreateCategoryCommand)
-export class CreateCategoryHandler
-  implements ICommandHandler<CreateCategoryCommand>
-{
+export class CreateCategoryHandler implements ICommandHandler<CreateCategoryCommand> {
   constructor(
     @Inject('ICategoryRepository')
     private readonly repository: ICategoryRepository,

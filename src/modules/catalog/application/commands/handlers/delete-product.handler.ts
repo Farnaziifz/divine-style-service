@@ -4,9 +4,7 @@ import { IProductRepository } from '../../../domain/repositories/product.reposit
 import { Inject, NotFoundException } from '@nestjs/common';
 
 @CommandHandler(DeleteProductCommand)
-export class DeleteProductHandler
-  implements ICommandHandler<DeleteProductCommand>
-{
+export class DeleteProductHandler implements ICommandHandler<DeleteProductCommand> {
   constructor(
     @Inject('IProductRepository')
     private readonly repository: IProductRepository,
