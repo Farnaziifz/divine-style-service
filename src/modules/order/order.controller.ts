@@ -33,6 +33,20 @@ export class OrderController {
               lastName: true,
             },
           },
+          items: {
+            where: { isDeleted: false },
+            select: {
+              id: true,
+              productId: true,
+              productVariantId: true,
+              sku: true,
+              title: true,
+              quantity: true,
+              unitPrice: true,
+              unitDiscountPrice: true,
+              createdAt: true,
+            },
+          },
         },
       }),
     ]);

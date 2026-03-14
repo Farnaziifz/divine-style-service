@@ -1,4 +1,13 @@
-import { Controller, Post, Delete, Get, Body, Param, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Delete,
+  Get,
+  Body,
+  Param,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { ShoppingListService } from './shopping-list.service';
@@ -41,7 +50,10 @@ export class ShoppingListController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'بررسی وجود محصول در لیست خرید' })
   async hasProduct(@Req() req: any, @Param('productId') productId: string) {
-    const inList = await this.shoppingListService.hasProduct(req.user.id, productId);
+    const inList = await this.shoppingListService.hasProduct(
+      req.user.id,
+      productId,
+    );
     return { inList };
   }
 }

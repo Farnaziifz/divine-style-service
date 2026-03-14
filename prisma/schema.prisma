@@ -25,6 +25,7 @@ model User {
   hashedRefreshToken String? // For Refresh Token mechanism
   reviews      ProductReview[]
   orders       Order[]
+  tempBaskets  TempBasket[]
   shoppingList ShoppingListItem[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -145,6 +146,7 @@ model Product {
   // Social
   reviews ProductReview[]
   shoppingListItems ShoppingListItem[]
+  orderItems OrderItem[]
 
   isActive    Boolean  @default(true)
   isFeatured  Boolean  @default(false) // محصول منتخب
@@ -179,6 +181,9 @@ model ProductVariant {
   // Variant specific specifications (e.g. Waist size for this size)
   specifications Json?
 
+  tempBasketItems TempBasketItem[]
+  orderItems      OrderItem[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   isDeleted Boolean  @default(false)
@@ -201,6 +206,37 @@ model ProductReview {
   updatedAt DateTime @updatedAt
   isDeleted Boolean  @default(false)
   deletedAt DateTime?
+}
+
+model TempBasket {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     TempBasketItem[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
+
+  @@index([userId])
+  @@index([userId, isDeleted])
+}
+
+model TempBasketItem {
+  id              String        @id @default(uuid()) @db.Uuid
+  basketId        String        @db.Uuid
+  basket          TempBasket    @relation(fields: [basketId], references: [id], onDelete: Cascade)
+  productVariantId String       @db.Uuid
+  productVariant  ProductVariant @relation(fields: [productVariantId], references: [id])
+  quantity        Int
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  isDeleted       Boolean       @default(false)
+  deletedAt       DateTime?
+
+  @@unique([basketId, productVariantId])
+  @@index([basketId])
+  @@index([productVariantId])
 }
 
 // User shopping list (لیست خرید) — separate from cart, persisted per user
@@ -235,8 +271,33 @@ model Order {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String   @db.Uuid
   user      User     @relation(fields: [userId], references: [id])
+  items     OrderItem[]
+  totalAmount Decimal @db.Decimal(10, 2) @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   isDeleted Boolean  @default(false)
   deletedAt DateTime?
+}
+
+model OrderItem {
+  id               String        @id @default(uuid()) @db.Uuid
+  orderId          String        @db.Uuid
+  order            Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId        String        @db.Uuid
+  product          Product       @relation(fields: [productId], references: [id])
+  productVariantId String        @db.Uuid
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id])
+  sku              String
+  title            String
+  quantity         Int
+  unitPrice        Decimal       @db.Decimal(10, 2)
+  unitDiscountPrice Decimal?     @db.Decimal(10, 2)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  isDeleted        Boolean       @default(false)
+  deletedAt        DateTime?
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([productVariantId])
 }

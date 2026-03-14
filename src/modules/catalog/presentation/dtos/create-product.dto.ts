@@ -63,13 +63,13 @@ export class CreateProductDto {
 
   @ApiPropertyOptional({ description: 'محصول منتخب' })
   @IsOptional()
-  @Transform(({ value }) => (value === true || value === 'true'))
+  @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   isFeatured?: boolean;
 
   @ApiPropertyOptional({ description: 'نمایش در اینترو' })
   @IsOptional()
-  @Transform(({ value }) => (value === true || value === 'true'))
+  @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   showInIntro?: boolean;
 }
