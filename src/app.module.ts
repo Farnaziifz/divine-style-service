@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { OrderModule } from './modules/order/order.module';
+import { ShoppingListModule } from './modules/shopping-list/shopping-list.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { OrderModule } from './modules/order/order.module';
     CatalogModule,
     UploadModule,
     OrderModule,
+    ShoppingListModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -25,6 +25,7 @@ model User {
   hashedRefreshToken String? // For Refresh Token mechanism
   reviews      ProductReview[]
   orders       Order[]
+  shoppingList ShoppingListItem[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   isDeleted    Boolean   @default(false)
@@ -132,6 +133,7 @@ model Product {
 
   // Social
   reviews ProductReview[]
+  shoppingListItems ShoppingListItem[]
 
   isActive    Boolean  @default(true)
   isFeatured  Boolean  @default(false) // محصول منتخب
@@ -188,6 +190,19 @@ model ProductReview {
   updatedAt DateTime @updatedAt
   isDeleted Boolean  @default(false)
   deletedAt DateTime?
+}
+
+// User shopping list (لیست خرید) — separate from cart, persisted per user
+model ShoppingListItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String   @db.Uuid
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId])
 }
 
 // Placeholder for Order
