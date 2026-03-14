@@ -1,4 +1,4 @@
-import { IsOptional, IsNumber, Min } from 'class-validator';
+import { IsOptional, IsNumber, Min, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -16,4 +16,9 @@ export class PaginationDto {
   @IsNumber()
   @Min(1)
   limit?: number = 10;
+
+  @ApiPropertyOptional({ description: 'جستجو در عنوان' })
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

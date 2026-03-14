@@ -73,6 +73,14 @@ export class PrismaProductRepository implements IProductRepository {
       };
     }
 
+    if (filter?.isFeatured === true) {
+      where.isFeatured = true;
+    }
+
+    if (filter?.showInIntro === true) {
+      where.showInIntro = true;
+    }
+
     if (filter?.minPrice || filter?.maxPrice) {
       where.variants = {
         some: {

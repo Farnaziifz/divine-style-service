@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "showInIntro" BOOLEAN NOT NULL DEFAULT false;

@@ -5,10 +5,11 @@ import {
   IsArray,
   IsObject,
   IsUUID,
+  IsBoolean,
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { CreateProductVariantDto } from './create-product-variant.dto';
 
 export class CreateProductDto {
@@ -59,4 +60,16 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => CreateProductVariantDto)
   variants?: CreateProductVariantDto[];
+
+  @ApiPropertyOptional({ description: 'محصول منتخب' })
+  @IsOptional()
+  @Transform(({ value }) => (value === true || value === 'true'))
+  @IsBoolean()
+  isFeatured?: boolean;
+
+  @ApiPropertyOptional({ description: 'نمایش در اینترو' })
+  @IsOptional()
+  @Transform(({ value }) => (value === true || value === 'true'))
+  @IsBoolean()
+  showInIntro?: boolean;
 }

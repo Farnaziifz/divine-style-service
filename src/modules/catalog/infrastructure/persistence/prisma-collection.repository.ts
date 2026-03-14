@@ -31,14 +31,19 @@ export class PrismaCollectionRepository implements ICollectionRepository {
     const page = Number(pagination?.page) || 1;
     const limit = Number(pagination?.limit) || 10;
     const skip = (page - 1) * limit;
+    const search = pagination?.search?.trim();
+    const where = search
+      ? { title: { contains: search, mode: 'insensitive' as const } }
+      : {};
 
     const [data, total] = await Promise.all([
       this.prisma.collection.findMany({
+        where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
       }),
-      this.prisma.collection.count(),
+      this.prisma.collection.count({ where }),
     ]);
 
     return {

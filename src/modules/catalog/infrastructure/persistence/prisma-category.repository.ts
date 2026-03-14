@@ -29,15 +29,20 @@ export class PrismaCategoryRepository implements ICategoryRepository {
     const page = Number(pagination?.page) || 1;
     const limit = Number(pagination?.limit) || 10;
     const skip = (page - 1) * limit;
+    const search = pagination?.search?.trim();
+    const where = search
+      ? { title: { contains: search, mode: 'insensitive' as const } }
+      : {};
 
     const [data, total] = await Promise.all([
       this.prisma.category.findMany({
+        where,
         skip,
         take: limit,
         include: { children: true },
         orderBy: { createdAt: 'desc' },
       }),
-      this.prisma.category.count(),
+      this.prisma.category.count({ where }),
     ]);
 
     return {
