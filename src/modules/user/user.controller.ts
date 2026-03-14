@@ -24,6 +24,14 @@ import {
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
+  @Get('testimonials')
+  @ApiOperation({ summary: 'دریافت نظرات تأییدشده (تستیمونیال) برای صفحه اصلی' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'تعداد (پیش‌فرض ۱۰، حداکثر ۵۰)' })
+  @ApiResponse({ status: 200, description: 'لیست نظرات تأییدشده' })
+  getTestimonials(@Query('limit') limit?: number) {
+    return this.userService.getTestimonials(limit ? Number(limit) : 10);
+  }
+
   @Get('profile')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()

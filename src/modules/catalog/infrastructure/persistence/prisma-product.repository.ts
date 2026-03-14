@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { IProductRepository } from '../../domain/repositories/product.repository.interface';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { Product } from '@prisma/client';
@@ -13,10 +14,11 @@ export class PrismaProductRepository implements IProductRepository {
   async create(
     data: CreateProductDto & { slug: string; images: string[] },
   ): Promise<Product> {
-    const { collectionIds, variants, ...rest } = data;
+    const { collectionIds, variants, slug, ...rest } = data;
     return this.prisma.product.create({
       data: {
         ...rest,
+        slug,
         collections: collectionIds
           ? {
               connect: collectionIds.map((id) => ({ id })),
@@ -25,8 +27,9 @@ export class PrismaProductRepository implements IProductRepository {
         variants: variants
           ? {
               create: variants.map((variant) => ({
+                // SKU یکتا در کل دیتابیس تا تداخل با محصولات دیگر نباشد
+                sku: `${slug}-${randomUUID().slice(0, 8)}`,
                 discountPercent: variant.discountPercent ?? undefined,
-                sku: variant.sku,
                 size: variant.size,
                 color: variant.color,
                 colorCode: variant.colorCode,
@@ -162,7 +165,7 @@ export class PrismaProductRepository implements IProductRepository {
       updateData.variants = {
         deleteMany: {},
         create: variants.map((variant: any) => ({
-          sku: variant.sku,
+          sku: `${id.slice(0, 8)}-${randomUUID().slice(0, 8)}`,
           size: variant.size,
           color: variant.color,
           colorCode: variant.colorCode,

@@ -35,6 +35,29 @@ export class UserService {
     return result;
   }
 
+  /**
+   * نظرات کلی برند (تستیمونیال صفحه اصلی) — بدون وابستگی به محصول، فقط تأییدشده‌ها
+   */
+  async getTestimonials(limit: number = 10) {
+    const testimonials = await this.prisma.siteTestimonial.findMany({
+      where: {
+        isApproved: true,
+        isDeleted: false,
+      },
+      orderBy: [{ order: 'asc' }, { createdAt: 'desc' }],
+      take: Math.min(limit, 50),
+    });
+
+    return testimonials.map((t) => ({
+      id: t.id,
+      rating: t.rating,
+      comment: t.comment,
+      createdAt: t.createdAt,
+      userName: t.authorName,
+      productTitle: null,
+    }));
+  }
+
   async findAll(
     page: number = 1,
     limit: number = 10,

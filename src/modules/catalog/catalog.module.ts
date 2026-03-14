@@ -7,6 +7,7 @@ import { CollectionController } from './presentation/controllers/collection.cont
 import { CategoryController } from './presentation/controllers/category.controller';
 import { ProductController } from './presentation/controllers/product.controller';
 import { CatalogSpecificationController } from './presentation/controllers/catalog-specification.controller';
+import { SizeController } from './presentation/controllers/size.controller';
 
 // Repositories
 import { PrismaCollectionRepository } from './infrastructure/persistence/prisma-collection.repository';
@@ -49,6 +50,7 @@ import { GetSpecificationKeysHandler } from './application/queries/handlers/get-
     CategoryController,
     ProductController,
     CatalogSpecificationController,
+    SizeController,
   ],
   providers: [
     { provide: 'ICollectionRepository', useClass: PrismaCollectionRepository },

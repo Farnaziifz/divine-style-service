@@ -79,6 +79,17 @@ model Collection {
   deletedAt   DateTime?
 }
 
+// سایزهای قابل انتخاب در واریانت محصول (مدیریت از پنل ادمین)
+model Size {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique // مثلاً 42, XL, M
+  order     Int      @default(0) // ترتیب نمایش
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
+}
+
 // Dynamic Specifications (e.g., Fabric, Care, Origin)
 model SpecificationKey {
   id        String   @id @default(uuid()) @db.Uuid
@@ -203,6 +214,20 @@ model ShoppingListItem {
 
   @@unique([userId, productId])
   @@index([userId])
+}
+
+// نظرات کلی برند (تستیمونیال صفحه اصلی) — بدون وابستگی به محصول
+model SiteTestimonial {
+  id         String   @id @default(uuid()) @db.Uuid
+  authorName String   // نام نمایشی نویسنده نظر
+  comment    String   // متن نظر
+  rating     Int?     // 1-5 اختیاری
+  isApproved Boolean  @default(false)
+  order      Int      @default(0) // ترتیب نمایش (عدد کمتر = اول)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  isDeleted  Boolean  @default(false)
+  deletedAt  DateTime?
 }
 
 // Placeholder for Order
