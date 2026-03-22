@@ -26,6 +26,7 @@ model User {
   hashedRefreshToken String? // For Refresh Token mechanism
   reviews      ProductReview[]
   orders       Order[]
+  orderComments OrderComment[]
   tempBaskets  TempBasket[]
   shoppingList ShoppingListItem[]
   discountCodes              DiscountCode[]
@@ -370,6 +371,7 @@ model Order {
   userId    String   @db.Uuid
   user      User     @relation(fields: [userId], references: [id])
   items     OrderItem[]
+  comments  OrderComment[]
   totalAmount Decimal @db.Decimal(10, 2) @default(0)
   discountCode String?
   discountAmount Decimal @db.Decimal(10, 2) @default(0)
@@ -384,6 +386,27 @@ model Order {
   updatedAt DateTime @updatedAt
   isDeleted Boolean  @default(false)
   deletedAt DateTime?
+}
+
+model OrderComment {
+  id           String        @id @default(uuid()) @db.Uuid
+  orderId      String        @db.Uuid
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  authorRole   Role
+  authorUserId String?       @db.Uuid
+  authorUser   User?         @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+  parentId     String?       @db.Uuid
+  parent       OrderComment? @relation("OrderCommentToParent", fields: [parentId], references: [id], onDelete: Cascade)
+  replies      OrderComment[] @relation("OrderCommentToParent")
+  message      String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  isDeleted    Boolean       @default(false)
+  deletedAt    DateTime?
+
+  @@index([orderId])
+  @@index([authorUserId])
+  @@index([parentId])
 }
 
 model PaymentTransaction {

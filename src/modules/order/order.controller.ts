@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
   Req,
   UseGuards,
@@ -14,6 +15,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { OrderStatus } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { PaginationDto } from '../shared/dtos/pagination.dto';
+import { CreateOrderCommentDto } from './dtos/create-order-comment.dto';
 import { UpdateOrderStatusDto } from './dtos/update-order-status.dto';
 
 @ApiTags('Orders')
@@ -214,6 +216,20 @@ export class OrderController {
             verifiedAt: true,
           },
         },
+        comments: {
+          where: { isDeleted: false },
+          orderBy: { createdAt: 'asc' },
+          include: {
+            authorUser: {
+              select: {
+                id: true,
+                mobile: true,
+                name: true,
+                lastName: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -258,6 +274,128 @@ export class OrderController {
         ...p,
         amount: this.toNumber(p.amount),
       })),
+      comments: order.comments.map((c) => ({
+        id: c.id,
+        orderId: c.orderId,
+        authorRole: c.authorRole,
+        authorUser: c.authorUser,
+        parentId: c.parentId,
+        message: c.message,
+        createdAt: c.createdAt,
+      })),
+    };
+  }
+
+  @Get(':orderCode/comments')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List order comments by order code' })
+  async listComments(@Req() req: any, @Param('orderCode') orderCode: string) {
+    const whereOrder: any = { isDeleted: false, orderCode };
+    if (req.user?.role !== 'ADMIN') {
+      whereOrder.userId = req.user.id;
+    }
+
+    const order = await this.prisma.order.findFirst({
+      where: whereOrder,
+      select: { id: true },
+    });
+    if (!order) {
+      throw new BadRequestException('Order not found');
+    }
+
+    const comments = await this.prisma.orderComment.findMany({
+      where: { orderId: order.id, isDeleted: false },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        authorUser: {
+          select: {
+            id: true,
+            mobile: true,
+            name: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    return comments.map((c) => ({
+      id: c.id,
+      orderId: c.orderId,
+      authorRole: c.authorRole,
+      authorUser: c.authorUser,
+      parentId: c.parentId,
+      message: c.message,
+      createdAt: c.createdAt,
+    }));
+  }
+
+  @Post(':orderCode/comments')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create order comment (admin or user)' })
+  async createComment(
+    @Req() req: any,
+    @Param('orderCode') orderCode: string,
+    @Body() dto: CreateOrderCommentDto,
+  ) {
+    const whereOrder: any = { isDeleted: false, orderCode };
+    if (req.user?.role !== 'ADMIN') {
+      whereOrder.userId = req.user.id;
+    }
+
+    const order = await this.prisma.order.findFirst({
+      where: whereOrder,
+      select: { id: true },
+    });
+    if (!order) {
+      throw new BadRequestException('Order not found');
+    }
+
+    let parentId: string | null = null;
+    if (dto.parentId) {
+      const parent = await this.prisma.orderComment.findFirst({
+        where: {
+          id: dto.parentId,
+          orderId: order.id,
+          isDeleted: false,
+        },
+        select: { id: true },
+      });
+      if (!parent) {
+        throw new BadRequestException('Parent comment not found');
+      }
+      parentId = parent.id;
+    }
+
+    const created = await this.prisma.orderComment.create({
+      data: {
+        orderId: order.id,
+        authorRole: req.user?.role ?? 'USER',
+        authorUserId: req.user?.id ?? null,
+        parentId,
+        message: dto.message.trim(),
+      },
+      include: {
+        authorUser: {
+          select: {
+            id: true,
+            mobile: true,
+            name: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    return {
+      id: created.id,
+      orderId: created.orderId,
+      authorRole: created.authorRole,
+      authorUser: created.authorUser,
+      parentId: created.parentId,
+      message: created.message,
+      createdAt: created.createdAt,
     };
   }
 
