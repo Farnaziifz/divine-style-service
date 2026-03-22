@@ -13,6 +13,7 @@ import {
   DiscountCodeScope,
   DiscountValueType,
   Prisma,
+  Role,
 } from '@prisma/client';
 
 @Injectable()
@@ -27,9 +28,10 @@ export class DiscountService {
     scope: DiscountCodeScope;
     userId?: string | null;
     userGroupId?: string | null;
+    userIds?: string[] | null;
   }) {
     if (dto.scope === DiscountCodeScope.ALL_USERS) {
-      if (dto.userId || dto.userGroupId) {
+      if (dto.userId || dto.userGroupId || dto.userIds?.length) {
         throw new BadRequestException(
           'برای تخفیف عمومی نباید کاربر یا گروه مشخص شود',
         );
@@ -46,6 +48,23 @@ export class DiscountService {
           'برای تخفیف تک‌کاربره نباید userGroupId ارسال شود',
         );
       }
+      if (dto.userIds?.length) {
+        throw new BadRequestException(
+          'برای تخفیف تک‌کاربره نباید userIds ارسال شود',
+        );
+      }
+    }
+    if (dto.scope === DiscountCodeScope.MULTIPLE_USERS) {
+      if (!dto.userIds?.length) {
+        throw new BadRequestException(
+          'برای تخفیف چندکاربره، حداقل یک کاربر انتخاب کنید',
+        );
+      }
+      if (dto.userId || dto.userGroupId) {
+        throw new BadRequestException(
+          'برای تخفیف چندکاربره فقط userIds مجاز است',
+        );
+      }
     }
     if (dto.scope === DiscountCodeScope.USER_GROUP) {
       if (!dto.userGroupId) {
@@ -58,8 +77,45 @@ export class DiscountService {
           'برای تخفیف گروهی نباید userId ارسال شود',
         );
       }
+      if (dto.userIds?.length) {
+        throw new BadRequestException(
+          'برای تخفیف گروهی نباید userIds ارسال شود',
+        );
+      }
     }
   }
+
+  private async assertEligibleUsersExist(userIds: string[]) {
+    const unique = [...new Set(userIds)];
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: { in: unique },
+        role: { not: Role.ADMIN },
+        isDeleted: false,
+      },
+      select: { id: true },
+    });
+    if (users.length !== unique.length) {
+      throw new BadRequestException(
+        'یک یا چند کاربر یافت نشد یا حساب ادمین قابل انتخاب نیست',
+      );
+    }
+  }
+
+  private readonly eligibleInclude = {
+    eligibleUsers: {
+      include: {
+        user: {
+          select: {
+            id: true,
+            mobile: true,
+            name: true,
+            lastName: true,
+          },
+        },
+      },
+    },
+  } as const;
 
   private assertValueRules(valueType: DiscountValueType, value: number) {
     if (valueType === DiscountValueType.PERCENT) {
@@ -119,10 +175,16 @@ export class DiscountService {
 
   async create(dto: CreateDiscountCodeDto) {
     const code = this.normalizeCode(dto.code);
+    const userIds =
+      dto.scope === DiscountCodeScope.MULTIPLE_USERS && dto.userIds?.length
+        ? [...new Set(dto.userIds)]
+        : null;
+
     this.assertScopePayload({
       scope: dto.scope,
       userId: dto.userId,
       userGroupId: dto.userGroupId,
+      userIds,
     });
     this.assertValueRules(dto.valueType, dto.value);
 
@@ -140,6 +202,10 @@ export class DiscountService {
       }
     }
 
+    if (userIds?.length) {
+      await this.assertEligibleUsersExist(userIds);
+    }
+
     const existing = await this.prisma.discountCode.findFirst({
       where: { code },
     });
@@ -147,28 +213,62 @@ export class DiscountService {
       throw new ConflictException('این کد تخفیف قبلاً ثبت شده است');
     }
 
-    const created = await this.prisma.discountCode.create({
-      data: {
-        code,
-        title: dto.title?.trim() || null,
-        scope: dto.scope,
-        userId: dto.scope === DiscountCodeScope.SINGLE_USER ? dto.userId : null,
-        userGroupId:
-          dto.scope === DiscountCodeScope.USER_GROUP ? dto.userGroupId : null,
-        valueType: dto.valueType,
-        value: new Prisma.Decimal(dto.value),
-        minOrderAmount:
-          dto.minOrderAmount != null
-            ? new Prisma.Decimal(dto.minOrderAmount)
-            : null,
-        validFrom,
-        validTo,
-        maxTotalUses: dto.maxTotalUses ?? null,
-        isActive: dto.isActive ?? true,
-      },
+    const row = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.discountCode.create({
+        data: {
+          code,
+          title: dto.title?.trim() || null,
+          scope: dto.scope,
+          userId: dto.scope === DiscountCodeScope.SINGLE_USER ? dto.userId : null,
+          userGroupId:
+            dto.scope === DiscountCodeScope.USER_GROUP ? dto.userGroupId : null,
+          valueType: dto.valueType,
+          value: new Prisma.Decimal(dto.value),
+          minOrderAmount:
+            dto.minOrderAmount != null
+              ? new Prisma.Decimal(dto.minOrderAmount)
+              : null,
+          validFrom,
+          validTo,
+          maxTotalUses: dto.maxTotalUses ?? null,
+          isActive: dto.isActive ?? true,
+        },
+      });
+
+      if (userIds?.length) {
+        await tx.discountCodeEligibleUser.createMany({
+          data: userIds.map((userId) => ({
+            discountCodeId: created.id,
+            userId,
+          })),
+        });
+      }
+
+      return tx.discountCode.findFirst({
+        where: { id: created.id },
+        include: {
+          user: {
+            select: {
+              id: true,
+              mobile: true,
+              name: true,
+              lastName: true,
+            },
+          },
+          ...this.eligibleInclude,
+        },
+      });
     });
 
-    return this.serialize(created);
+    if (!row) {
+      throw new BadRequestException('ایجاد کد تخفیف ناموفق بود');
+    }
+    const { user, eligibleUsers, ...dc } = row;
+    return {
+      ...this.serialize(dc),
+      user,
+      eligibleUsers: eligibleUsers?.map((e) => e.user) ?? [],
+    };
   }
 
   async findAll(query: DiscountCodeQueryDto) {
@@ -208,14 +308,19 @@ export class DiscountService {
               lastName: true,
             },
           },
+          ...this.eligibleInclude,
         },
       }),
     ]);
 
     return {
       data: rows.map((r) => {
-        const { user, ...dc } = r;
-        return { ...this.serialize(dc), user };
+        const { user, eligibleUsers, ...dc } = r;
+        return {
+          ...this.serialize(dc),
+          user,
+          eligibleUsers: eligibleUsers?.map((e) => e.user) ?? [],
+        };
       }),
       meta: {
         total,
@@ -238,13 +343,18 @@ export class DiscountService {
             lastName: true,
           },
         },
+        ...this.eligibleInclude,
       },
     });
     if (!row) {
       throw new NotFoundException('کد تخفیف یافت نشد');
     }
-    const { user, ...dc } = row;
-    return { ...this.serialize(dc), user };
+    const { user, eligibleUsers, ...dc } = row;
+    return {
+      ...this.serialize(dc),
+      user,
+      eligibleUsers: eligibleUsers?.map((e) => e.user) ?? [],
+    };
   }
 
   async update(id: string, dto: UpdateDiscountCodeDto) {
@@ -259,6 +369,7 @@ export class DiscountService {
             lastName: true,
           },
         },
+        eligibleUsers: { select: { userId: true } },
       },
     });
     if (!current) {
@@ -276,7 +387,10 @@ export class DiscountService {
       } else if (dto.scope === DiscountCodeScope.SINGLE_USER) {
         userGroupId = null;
         userId = dto.userId ?? current.userId;
-      } else {
+      } else if (dto.scope === DiscountCodeScope.MULTIPLE_USERS) {
+        userId = null;
+        userGroupId = null;
+      } else if (dto.scope === DiscountCodeScope.USER_GROUP) {
         userId = null;
         userGroupId = dto.userGroupId ?? current.userGroupId;
       }
@@ -285,7 +399,38 @@ export class DiscountService {
       if (dto.userGroupId !== undefined) userGroupId = dto.userGroupId;
     }
 
-    this.assertScopePayload({ scope, userId, userGroupId });
+    const transitioningToMulti =
+      scope === DiscountCodeScope.MULTIPLE_USERS &&
+      current.scope !== DiscountCodeScope.MULTIPLE_USERS;
+
+    if (transitioningToMulti && dto.userIds === undefined) {
+      throw new BadRequestException(
+        'برای تبدیل به تخفیف چندکاربره، userIds الزامی است',
+      );
+    }
+
+    const nextUserIds =
+      dto.userIds !== undefined ? [...new Set(dto.userIds)] : undefined;
+
+    if (scope === DiscountCodeScope.MULTIPLE_USERS) {
+      const effectiveIds =
+        nextUserIds ??
+        current.eligibleUsers.map((e) => e.userId);
+      this.assertScopePayload({
+        scope,
+        userId: null,
+        userGroupId: null,
+        userIds: effectiveIds,
+      });
+      await this.assertEligibleUsersExist(effectiveIds);
+    } else {
+      this.assertScopePayload({
+        scope,
+        userId,
+        userGroupId,
+        userIds: null,
+      });
+    }
 
     const valueType = dto.valueType ?? current.valueType;
     const valueNum = dto.value ?? current.value.toNumber();
@@ -321,51 +466,81 @@ export class DiscountService {
       }
     }
 
-    const updated = await this.prisma.discountCode.update({
-      where: { id },
-      data: {
-        ...(dto.code !== undefined
-          ? { code: this.normalizeCode(dto.code) }
-          : {}),
-        ...(dto.title !== undefined
-          ? { title: dto.title?.trim() || null }
-          : {}),
-        scope,
-        userId,
-        userGroupId,
-        ...(dto.valueType !== undefined ? { valueType: dto.valueType } : {}),
-        ...(dto.value !== undefined
-          ? { value: new Prisma.Decimal(dto.value) }
-          : {}),
-        ...(dto.minOrderAmount !== undefined
-          ? {
-              minOrderAmount:
-                dto.minOrderAmount == null
-                  ? null
-                  : new Prisma.Decimal(dto.minOrderAmount),
-            }
-          : {}),
-        validFrom,
-        validTo,
-        ...(dto.maxTotalUses !== undefined
-          ? { maxTotalUses: dto.maxTotalUses }
-          : {}),
-        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            mobile: true,
-            name: true,
-            lastName: true,
-          },
+    const row = await this.prisma.$transaction(async (tx) => {
+      await tx.discountCode.update({
+        where: { id },
+        data: {
+          ...(dto.code !== undefined
+            ? { code: this.normalizeCode(dto.code) }
+            : {}),
+          ...(dto.title !== undefined
+            ? { title: dto.title?.trim() || null }
+            : {}),
+          scope,
+          userId,
+          userGroupId,
+          ...(dto.valueType !== undefined ? { valueType: dto.valueType } : {}),
+          ...(dto.value !== undefined
+            ? { value: new Prisma.Decimal(dto.value) }
+            : {}),
+          ...(dto.minOrderAmount !== undefined
+            ? {
+                minOrderAmount:
+                  dto.minOrderAmount == null
+                    ? null
+                    : new Prisma.Decimal(dto.minOrderAmount),
+              }
+            : {}),
+          validFrom,
+          validTo,
+          ...(dto.maxTotalUses !== undefined
+            ? { maxTotalUses: dto.maxTotalUses }
+            : {}),
+          ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         },
-      },
+      });
+
+      if (scope !== DiscountCodeScope.MULTIPLE_USERS) {
+        await tx.discountCodeEligibleUser.deleteMany({
+          where: { discountCodeId: id },
+        });
+      } else if (nextUserIds !== undefined) {
+        await tx.discountCodeEligibleUser.deleteMany({
+          where: { discountCodeId: id },
+        });
+        await tx.discountCodeEligibleUser.createMany({
+          data: nextUserIds.map((uid) => ({
+            discountCodeId: id,
+            userId: uid,
+          })),
+        });
+      }
+
+      return tx.discountCode.findFirst({
+        where: { id },
+        include: {
+          user: {
+            select: {
+              id: true,
+              mobile: true,
+              name: true,
+              lastName: true,
+            },
+          },
+          ...this.eligibleInclude,
+        },
+      });
     });
 
-    const { user, ...dc } = updated;
-    return { ...this.serialize(dc), user };
+    if (!row) {
+      throw new BadRequestException('به‌روزرسانی ناموفق بود');
+    }
+    const { user, eligibleUsers, ...dc } = row;
+    return {
+      ...this.serialize(dc),
+      user,
+      eligibleUsers: eligibleUsers?.map((e) => e.user) ?? [],
+    };
   }
 
   async remove(id: string) {

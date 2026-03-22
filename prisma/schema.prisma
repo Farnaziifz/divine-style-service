@@ -28,7 +28,8 @@ model User {
   orders       Order[]
   tempBaskets  TempBasket[]
   shoppingList ShoppingListItem[]
-  discountCodes DiscountCode[]
+  discountCodes              DiscountCode[]
+  discountCodeEligibilities  DiscountCodeEligibleUser[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   isDeleted    Boolean   @default(false)
@@ -53,9 +54,10 @@ enum Role {
 // ----------------------
 
 enum DiscountCodeScope {
-  ALL_USERS    // همه کاربران
-  SINGLE_USER  // یک کاربر مشخص
-  USER_GROUP   // دسته کاربران (userGroupId — منطق بیزینس بعداً)
+  ALL_USERS        // همه کاربران
+  SINGLE_USER      // یک کاربر مشخص (userId)
+  MULTIPLE_USERS   // چند کاربر مشخص (جدول واسط)
+  USER_GROUP       // دسته کاربران (userGroupId — منطق بیزینس بعداً)
 }
 
 enum DiscountValueType {
@@ -75,6 +77,9 @@ model DiscountCode {
   user        User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   /// وقتی scope = USER_GROUP (جدول گروه بعداً اضافه می‌شود)
   userGroupId String? @db.Uuid
+
+  /// وقتی scope = MULTIPLE_USERS
+  eligibleUsers DiscountCodeEligibleUser[]
 
   valueType      DiscountValueType
   /// درصد (۱–۱۰۰) یا مبلغ ثابت بسته به valueType
@@ -99,6 +104,18 @@ model DiscountCode {
   @@index([validFrom, validTo])
   @@index([userId])
   @@index([userGroupId])
+}
+
+/// کاربرانی که برای کد با scope = MULTIPLE_USERS مجاز به استفاده هستند
+model DiscountCodeEligibleUser {
+  id             String       @id @default(uuid()) @db.Uuid
+  discountCodeId String       @db.Uuid
+  discountCode   DiscountCode @relation(fields: [discountCodeId], references: [id], onDelete: Cascade)
+  userId         String       @db.Uuid
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([discountCodeId, userId])
+  @@index([userId])
 }
 
 // ----------------------
@@ -322,6 +339,22 @@ model SiteTestimonial {
 }
 
 // Placeholder for Order
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
+enum PaymentProvider {
+  ZARINPAL
+}
+
+enum PaymentTransactionStatus {
+  INITIATED
+  PAID
+  FAILED
+}
+
 model Order {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String   @db.Uuid
@@ -333,10 +366,32 @@ model Order {
   shippingCost Decimal @db.Decimal(10, 2) @default(0)
   payableAmount Decimal @db.Decimal(10, 2) @default(0)
   shippingAddress Json? @db.JsonB
+  paymentStatus PaymentStatus @default(PENDING)
+  paidAt DateTime?
+  payments PaymentTransaction[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   isDeleted Boolean  @default(false)
   deletedAt DateTime?
+}
+
+model PaymentTransaction {
+  id        String   @id @default(uuid()) @db.Uuid
+  orderId   String   @db.Uuid
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider  PaymentProvider
+  status    PaymentTransactionStatus @default(INITIATED)
+  amount    Decimal  @db.Decimal(10, 2)
+  authority String?  @unique
+  refId     String?
+  createdAt DateTime @default(now())
+  verifiedAt DateTime?
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
+
+  @@index([orderId])
+  @@index([provider])
+  @@index([status])
 }
 
 model OrderItem {

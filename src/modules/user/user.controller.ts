@@ -122,14 +122,31 @@ export class UserController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'name', required: false, type: String })
   @ApiQuery({ name: 'mobile', required: false, type: String })
+  @ApiQuery({
+    name: 'excludeAdmin',
+    required: false,
+    type: Boolean,
+    description: 'فقط کاربران غیر ادمین (مثلاً برای انتخاب در کد تخفیف)',
+  })
   @ApiResponse({ status: 200, description: 'لیست کاربران دریافت شد' })
   findAll(
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
     @Query('name') name?: string,
     @Query('mobile') mobile?: string,
+    @Query('excludeAdmin') excludeAdmin?: string,
   ) {
-    return this.userService.findAll(Number(page), Number(limit), name, mobile);
+    const exclude =
+      excludeAdmin === 'true' ||
+      excludeAdmin === '1' ||
+      excludeAdmin === 'yes';
+    return this.userService.findAll(
+      Number(page),
+      Number(limit),
+      name,
+      mobile,
+      exclude,
+    );
   }
 
   @Get(':id')

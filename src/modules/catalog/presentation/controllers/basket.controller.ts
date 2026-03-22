@@ -14,6 +14,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { DiscountService } from '../../../discount/discount.service';
+import { PaymentService } from '../../../payment/payment.service';
 import { UpsertBasketItemDto } from '../dtos/upsert-basket-item.dto';
 import { UpdateBasketItemDto } from '../dtos/update-basket-item.dto';
 import { BasketCheckoutPreviewDto } from '../dtos/basket-checkout-preview.dto';
@@ -49,6 +50,7 @@ export class BasketController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly discountService: DiscountService,
+    private readonly paymentService: PaymentService,
   ) {}
 
   private async getOrCreateActiveBasket(userId: string) {
@@ -278,8 +280,11 @@ export class BasketController {
     let discountAmountCents = 0;
 
     if (discountCode) {
-      const discount = await this.prisma.discountCode.findUnique({
+      const discount = await this.prisma.discountCode.findFirst({
         where: { code: discountCode },
+        include: {
+          eligibleUsers: { select: { userId: true } },
+        },
       });
 
       if (
@@ -300,9 +305,14 @@ export class BasketController {
       }
 
       if (discount.scope === 'USER_GROUP') {
-        throw new BadRequestException(
-          'کدهای تخفیف گروهی هنوز فعال نیستند',
-        );
+        throw new BadRequestException('کدهای تخفیف گروهی هنوز فعال نیستند');
+      }
+
+      if (discount.scope === 'MULTIPLE_USERS') {
+        const allowed = discount.eligibleUsers.some((e) => e.userId === userId);
+        if (!allowed) {
+          throw new BadRequestException('کد تخفیف معتبر نیست');
+        }
       }
 
       if (
@@ -351,7 +361,7 @@ export class BasketController {
     const userId = req.user.id;
     const now = new Date();
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    const baseResult = await this.prisma.$transaction(async (tx) => {
       const basket = await tx.tempBasket.findFirst({
         where: { userId, isDeleted: false },
         orderBy: { createdAt: 'desc' },
@@ -397,8 +407,11 @@ export class BasketController {
       let discountAmountCents = 0;
 
       if (discountCode) {
-        const discount = await tx.discountCode.findUnique({
+        const discount = await tx.discountCode.findFirst({
           where: { code: discountCode },
+          include: {
+            eligibleUsers: { select: { userId: true } },
+          },
         });
 
         if (
@@ -419,9 +432,16 @@ export class BasketController {
         }
 
         if (discount.scope === 'USER_GROUP') {
-          throw new BadRequestException(
-            'کدهای تخفیف گروهی هنوز فعال نیستند',
+          throw new BadRequestException('کدهای تخفیف گروهی هنوز فعال نیستند');
+        }
+
+        if (discount.scope === 'MULTIPLE_USERS') {
+          const allowed = discount.eligibleUsers.some(
+            (e) => e.userId === userId,
           );
+          if (!allowed) {
+            throw new BadRequestException('کد تخفیف معتبر نیست');
+          }
         }
 
         if (
@@ -512,9 +532,69 @@ export class BasketController {
         select: { id: true },
       });
 
-      return { orderId: order.id, payableAmount: fromCents(payableCents) };
+      const payment = await tx.paymentTransaction.create({
+        data: {
+          orderId: order.id,
+          provider: 'ZARINPAL',
+          status: 'INITIATED',
+          amount: fromCents(payableCents),
+        },
+        select: { id: true },
+      });
+
+      return {
+        orderId: order.id,
+        payableAmount: fromCents(payableCents),
+        paymentTransactionId: payment.id,
+      };
     });
 
-    return result;
+    const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:3005';
+    const callbackUrl = `${backendUrl}/payments/zarinpal/callback?lang=fa`;
+    const amountToman = Math.round(Number(baseResult.payableAmount));
+
+    const requested = await this.paymentService.requestZarinpalPayment({
+      amountToman,
+      description: `Order ${baseResult.orderId}`,
+      callbackUrl,
+      mobile: req.user?.mobile,
+    });
+
+    if (requested.isMock) {
+      await this.prisma.$transaction([
+        this.prisma.paymentTransaction.update({
+          where: { id: baseResult.paymentTransactionId },
+          data: {
+            authority: requested.authority,
+            status: 'PAID',
+            refId: `MOCK-${Date.now()}`,
+            verifiedAt: new Date(),
+          },
+        }),
+        this.prisma.order.update({
+          where: { id: baseResult.orderId },
+          data: { paymentStatus: 'PAID', paidAt: new Date() },
+        }),
+      ]);
+
+      return {
+        orderId: baseResult.orderId,
+        payableAmount: baseResult.payableAmount,
+        paymentStatus: 'PAID',
+        paymentUrl: null,
+      };
+    }
+
+    await this.prisma.paymentTransaction.update({
+      where: { id: baseResult.paymentTransactionId },
+      data: { authority: requested.authority },
+    });
+
+    return {
+      orderId: baseResult.orderId,
+      payableAmount: baseResult.payableAmount,
+      paymentStatus: 'PENDING',
+      paymentUrl: requested.paymentUrl,
+    };
   }
 }

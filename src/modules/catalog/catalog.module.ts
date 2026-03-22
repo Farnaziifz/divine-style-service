@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { SharedModule } from '../shared/shared.module';
 import { DiscountModule } from '../discount/discount.module';
+import { PaymentModule } from '../payment/payment.module';
 
 // Controllers
 import { CollectionController } from './presentation/controllers/collection.controller';
@@ -45,7 +46,7 @@ import { DeleteSpecificationKeyHandler } from './application/commands/handlers/d
 import { GetSpecificationKeysHandler } from './application/queries/handlers/get-specification-keys.handler';
 
 @Module({
-  imports: [SharedModule, CqrsModule, DiscountModule],
+  imports: [SharedModule, CqrsModule, DiscountModule, PaymentModule],
   // Registered controllers
   controllers: [
     CollectionController,

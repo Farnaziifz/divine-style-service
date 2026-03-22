@@ -9,6 +9,7 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { OrderModule } from './modules/order/order.module';
 import { ShoppingListModule } from './modules/shopping-list/shopping-list.module';
 import { DiscountModule } from './modules/discount/discount.module';
+import { PaymentModule } from './modules/payment/payment.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { DiscountModule } from './modules/discount/discount.module';
     OrderModule,
     ShoppingListModule,
     DiscountModule,
+    PaymentModule,
   ],
   controllers: [AppController],
   providers: [AppService],

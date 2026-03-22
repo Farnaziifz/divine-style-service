@@ -1,4 +1,6 @@
 import {
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
@@ -47,6 +49,16 @@ export class CreateDiscountCodeDto {
   @IsNotEmpty()
   @IsUUID()
   userGroupId?: string;
+
+  @ApiPropertyOptional({
+    description: 'الزامی وقتی scope = MULTIPLE_USERS — حداقل یک کاربر',
+    type: [String],
+  })
+  @ValidateIf((o) => o.scope === DiscountCodeScope.MULTIPLE_USERS)
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsUUID('4', { each: true })
+  userIds?: string[];
 
   @ApiProperty({ enum: DiscountValueType })
   @IsEnum(DiscountValueType)

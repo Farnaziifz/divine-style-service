@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { UpdateUserDto } from './dtos/update-user.dto';
 import { PaginatedResult } from '../shared/interfaces/paginated-result.interface';
@@ -239,10 +240,15 @@ export class UserService {
     limit: number = 10,
     name?: string,
     mobile?: string,
+    excludeAdmin?: boolean,
   ): Promise<PaginatedResult<any>> {
     const skip = (page - 1) * limit;
 
     const where: any = {};
+
+    if (excludeAdmin) {
+      where.role = { not: Role.ADMIN };
+    }
 
     if (name) {
       where.OR = [
