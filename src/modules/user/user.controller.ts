@@ -137,9 +137,7 @@ export class UserController {
     @Query('excludeAdmin') excludeAdmin?: string,
   ) {
     const exclude =
-      excludeAdmin === 'true' ||
-      excludeAdmin === '1' ||
-      excludeAdmin === 'yes';
+      excludeAdmin === 'true' || excludeAdmin === '1' || excludeAdmin === 'yes';
     return this.userService.findAll(
       Number(page),
       Number(limit),

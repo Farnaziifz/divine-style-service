@@ -33,6 +33,7 @@ export class PaymentController {
     }
 
     const orderId = tx.orderId;
+    const orderCode = tx.order?.orderCode;
 
     if (status !== 'OK') {
       await this.prisma.$transaction([
@@ -49,7 +50,9 @@ export class PaymentController {
         }),
       ]);
       return res.redirect(
-        `${frontendUrl}/${language}/payment/failed?orderId=${orderId}`,
+        `${frontendUrl}/${language}/payment/failed?orderCode=${encodeURIComponent(
+          orderCode || orderId,
+        )}`,
       );
     }
 
@@ -75,7 +78,9 @@ export class PaymentController {
     ]);
 
     return res.redirect(
-      `${frontendUrl}/${language}/payment/success?orderId=${orderId}`,
+      `${frontendUrl}/${language}/payment/success?orderCode=${encodeURIComponent(
+        orderCode || orderId,
+      )}`,
     );
   }
 }

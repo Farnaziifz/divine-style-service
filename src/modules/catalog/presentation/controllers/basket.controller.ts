@@ -44,6 +44,10 @@ function fromCents(cents: number): number {
   return Math.round(cents) / 100;
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
 @ApiTags('Basket')
 @Controller('basket')
 export class BasketController {
@@ -490,8 +494,28 @@ export class BasketController {
       const payableCents =
         subtotalCents - discountAmountCents + shippingCostCents;
 
+      const nowLocal = new Date();
+      const y = nowLocal.getFullYear();
+      const m = pad2(nowLocal.getMonth() + 1);
+      const d = pad2(nowLocal.getDate());
+
+      let orderCode = '';
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const rnd = Math.floor(Math.random() * 1_000_000);
+        orderCode = `DV-${y}${m}${d}-${String(rnd).padStart(6, '0')}`;
+        const exists = await tx.order.findUnique({
+          where: { orderCode },
+          select: { id: true },
+        });
+        if (!exists) break;
+      }
+      if (!orderCode) {
+        orderCode = `DV-${y}${m}${d}-${Date.now()}`;
+      }
+
       const order = await tx.order.create({
         data: {
+          orderCode,
           userId,
           totalAmount: fromCents(subtotalCents),
           discountCode,
@@ -500,7 +524,7 @@ export class BasketController {
           payableAmount: fromCents(payableCents),
           shippingAddress: selectedAddress,
         },
-        select: { id: true },
+        select: { id: true, orderCode: true },
       });
 
       await tx.orderItem.createMany({
@@ -544,6 +568,7 @@ export class BasketController {
 
       return {
         orderId: order.id,
+        orderCode: order.orderCode,
         payableAmount: fromCents(payableCents),
         paymentTransactionId: payment.id,
       };
@@ -579,6 +604,7 @@ export class BasketController {
 
       return {
         orderId: baseResult.orderId,
+        orderCode: baseResult.orderCode,
         payableAmount: baseResult.payableAmount,
         paymentStatus: 'PAID',
         paymentUrl: null,
@@ -592,6 +618,7 @@ export class BasketController {
 
     return {
       orderId: baseResult.orderId,
+      orderCode: baseResult.orderCode,
       payableAmount: baseResult.payableAmount,
       paymentStatus: 'PENDING',
       paymentUrl: requested.paymentUrl,

@@ -357,6 +357,7 @@ enum PaymentTransactionStatus {
 
 model Order {
   id        String   @id @default(uuid()) @db.Uuid
+  orderCode String   @unique
   userId    String   @db.Uuid
   user      User     @relation(fields: [userId], references: [id])
   items     OrderItem[]

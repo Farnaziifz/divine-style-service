@@ -219,7 +219,8 @@ export class DiscountService {
           code,
           title: dto.title?.trim() || null,
           scope: dto.scope,
-          userId: dto.scope === DiscountCodeScope.SINGLE_USER ? dto.userId : null,
+          userId:
+            dto.scope === DiscountCodeScope.SINGLE_USER ? dto.userId : null,
           userGroupId:
             dto.scope === DiscountCodeScope.USER_GROUP ? dto.userGroupId : null,
           valueType: dto.valueType,
@@ -414,8 +415,7 @@ export class DiscountService {
 
     if (scope === DiscountCodeScope.MULTIPLE_USERS) {
       const effectiveIds =
-        nextUserIds ??
-        current.eligibleUsers.map((e) => e.userId);
+        nextUserIds ?? current.eligibleUsers.map((e) => e.userId);
       this.assertScopePayload({
         scope,
         userId: null,
