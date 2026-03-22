@@ -15,6 +15,8 @@ import { AuthGuard } from '@nestjs/passport';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { UpsertBasketItemDto } from '../dtos/upsert-basket-item.dto';
 import { UpdateBasketItemDto } from '../dtos/update-basket-item.dto';
+import { BasketCheckoutPreviewDto } from '../dtos/basket-checkout-preview.dto';
+import { BasketCheckoutDto } from '../dtos/basket-checkout.dto';
 
 function toNumber(value: any): number {
   if (typeof value === 'number') return value;
@@ -28,6 +30,16 @@ function toNumber(value: any): number {
   }
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function toCents(value: any): number {
+  const n = toNumber(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100);
+}
+
+function fromCents(cents: number): number {
+  return Math.round(cents) / 100;
 }
 
 @ApiTags('Basket')
@@ -206,13 +218,114 @@ export class BasketController {
     return this.getBasketResponse(userId);
   }
 
+  @Post('checkout/preview')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Checkout preview (server-side price verification + discount validation)',
+  })
+  async checkoutPreview(@Req() req: any, @Body() dto: BasketCheckoutPreviewDto) {
+    const userId = req.user.id;
+    const now = new Date();
+
+    const basket = await this.prisma.tempBasket.findFirst({
+      where: { userId, isDeleted: false },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        items: {
+          where: { isDeleted: false },
+          include: {
+            productVariant: {
+              include: {
+                product: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!basket || basket.items.length === 0) {
+      throw new BadRequestException('Basket is empty');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { addresses: true },
+    });
+    const addresses = Array.isArray(user?.addresses) ? (user?.addresses as any[]) : [];
+    const selectedAddress = addresses.find((a) => a?.id === dto.addressId);
+    if (!selectedAddress) throw new BadRequestException('Address not found');
+
+    const subtotalCents = basket.items.reduce((sum, item) => {
+      const variant = item.productVariant;
+      const unit = variant.discountPrice ?? variant.price;
+      return sum + toCents(unit) * item.quantity;
+    }, 0);
+
+    const shippingCostCents = 0;
+    const discountCodeRaw = dto.discountCode?.trim();
+    const discountCode = discountCodeRaw ? discountCodeRaw.toUpperCase() : null;
+    let discountAmountCents = 0;
+
+    if (discountCode) {
+      const discount = await this.prisma.discountCode.findUnique({
+        where: { code: discountCode },
+      });
+
+      if (
+        !discount ||
+        discount.isDeleted ||
+        !discount.isActive ||
+        now < discount.validFrom ||
+        now > discount.validTo
+      ) {
+        throw new BadRequestException('کد تخفیف معتبر نیست');
+      }
+
+      if (discount.maxTotalUses != null && discount.usedCount >= discount.maxTotalUses) {
+        throw new BadRequestException('کد تخفیف معتبر نیست');
+      }
+
+      if (discount.scope === 'SINGLE_USER' && discount.userId && discount.userId !== userId) {
+        throw new BadRequestException('کد تخفیف معتبر نیست');
+      }
+
+      const minOrder = discount.minOrderAmount != null ? toCents(discount.minOrderAmount) : null;
+      if (minOrder != null && subtotalCents < minOrder) {
+        throw new BadRequestException('کد تخفیف معتبر نیست');
+      }
+
+      if (discount.valueType === 'PERCENT') {
+        const percent = toNumber(discount.value);
+        discountAmountCents = Math.round((subtotalCents * percent) / 100);
+      } else {
+        discountAmountCents = toCents(discount.value);
+      }
+
+      if (discountAmountCents < 0) discountAmountCents = 0;
+      if (discountAmountCents > subtotalCents) discountAmountCents = subtotalCents;
+    }
+
+    const payableCents = subtotalCents - discountAmountCents + shippingCostCents;
+
+    return {
+      subtotal: fromCents(subtotalCents),
+      discountCode,
+      discountAmount: fromCents(discountAmountCents),
+      shippingCost: fromCents(shippingCostCents),
+      payableAmount: fromCents(payableCents),
+      address: selectedAddress,
+    };
+  }
+
   @Post('checkout')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Checkout basket -> create order and soft delete basket',
   })
-  async checkout(@Req() req: any) {
+  async checkout(@Req() req: any, @Body() dto: BasketCheckoutDto) {
     const userId = req.user.id;
     const now = new Date();
 
@@ -238,16 +351,93 @@ export class BasketController {
         throw new BadRequestException('Basket is empty');
       }
 
-      const totalAmount = basket.items.reduce((sum, item) => {
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { addresses: true },
+      });
+      const addresses = Array.isArray(user?.addresses) ? (user?.addresses as any[]) : [];
+      const selectedAddress = addresses.find((a) => a?.id === dto.addressId);
+      if (!selectedAddress) throw new BadRequestException('Address not found');
+
+      const subtotalCents = basket.items.reduce((sum, item) => {
         const variant = item.productVariant;
         const unit = variant.discountPrice ?? variant.price;
-        return sum + toNumber(unit) * item.quantity;
+        return sum + toCents(unit) * item.quantity;
       }, 0);
+
+      const shippingCostCents = 0;
+      const discountCodeRaw = dto.discountCode?.trim();
+      const discountCode = discountCodeRaw ? discountCodeRaw.toUpperCase() : null;
+      let discountAmountCents = 0;
+
+      if (discountCode) {
+        const discount = await tx.discountCode.findUnique({
+          where: { code: discountCode },
+        });
+
+        if (
+          !discount ||
+          discount.isDeleted ||
+          !discount.isActive ||
+          now < discount.validFrom ||
+          now > discount.validTo
+        ) {
+          throw new BadRequestException('کد تخفیف معتبر نیست');
+        }
+
+        if (discount.maxTotalUses != null && discount.usedCount >= discount.maxTotalUses) {
+          throw new BadRequestException('کد تخفیف معتبر نیست');
+        }
+
+        if (discount.scope === 'SINGLE_USER' && discount.userId && discount.userId !== userId) {
+          throw new BadRequestException('کد تخفیف معتبر نیست');
+        }
+
+        const minOrder = discount.minOrderAmount != null ? toCents(discount.minOrderAmount) : null;
+        if (minOrder != null && subtotalCents < minOrder) {
+          throw new BadRequestException('کد تخفیف معتبر نیست');
+        }
+
+        if (discount.valueType === 'PERCENT') {
+          const percent = toNumber(discount.value);
+          discountAmountCents = Math.round((subtotalCents * percent) / 100);
+        } else {
+          discountAmountCents = toCents(discount.value);
+        }
+
+        if (discountAmountCents < 0) discountAmountCents = 0;
+        if (discountAmountCents > subtotalCents) discountAmountCents = subtotalCents;
+
+        if (discount.maxTotalUses != null) {
+          const updated = await tx.discountCode.updateMany({
+            where: {
+              code: discountCode,
+              isDeleted: false,
+              isActive: true,
+              usedCount: { lt: discount.maxTotalUses },
+            },
+            data: { usedCount: { increment: 1 } },
+          });
+          if (updated.count === 0) throw new BadRequestException('کد تخفیف معتبر نیست');
+        } else {
+          await tx.discountCode.update({
+            where: { code: discountCode },
+            data: { usedCount: { increment: 1 } },
+          });
+        }
+      }
+
+      const payableCents = subtotalCents - discountAmountCents + shippingCostCents;
 
       const order = await tx.order.create({
         data: {
           userId,
-          totalAmount,
+          totalAmount: fromCents(subtotalCents),
+          discountCode,
+          discountAmount: fromCents(discountAmountCents),
+          shippingCost: fromCents(shippingCostCents),
+          payableAmount: fromCents(payableCents),
+          shippingAddress: selectedAddress,
         },
         select: { id: true },
       });
@@ -281,7 +471,7 @@ export class BasketController {
         select: { id: true },
       });
 
-      return { orderId: order.id, totalAmount };
+      return { orderId: order.id, payableAmount: fromCents(payableCents) };
     });
 
     return result;

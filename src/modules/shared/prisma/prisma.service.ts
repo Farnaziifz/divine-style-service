@@ -19,6 +19,7 @@ export class PrismaService
         'ProductVariant',
         'ProductReview',
         'Order',
+        'DiscountCode',
       ];
 
       if (params.model && modelsWithSoftDelete.includes(params.model)) {

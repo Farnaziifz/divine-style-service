@@ -8,6 +8,7 @@ import { UploadModule } from './modules/upload/upload.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { OrderModule } from './modules/order/order.module';
 import { ShoppingListModule } from './modules/shopping-list/shopping-list.module';
+import { DiscountModule } from './modules/discount/discount.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ShoppingListModule } from './modules/shopping-list/shopping-list.module
     UploadModule,
     OrderModule,
     ShoppingListModule,
+    DiscountModule,
   ],
   controllers: [AppController],
   providers: [AppService],

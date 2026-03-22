@@ -28,6 +28,7 @@ model User {
   orders       Order[]
   tempBaskets  TempBasket[]
   shoppingList ShoppingListItem[]
+  discountCodes DiscountCode[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   isDeleted    Boolean   @default(false)
@@ -45,6 +46,59 @@ model Otp {
 enum Role {
   USER
   ADMIN
+}
+
+// ----------------------
+// Discount codes (کدهای تخفیف)
+// ----------------------
+
+enum DiscountCodeScope {
+  ALL_USERS    // همه کاربران
+  SINGLE_USER  // یک کاربر مشخص
+  USER_GROUP   // دسته کاربران (userGroupId — منطق بیزینس بعداً)
+}
+
+enum DiscountValueType {
+  PERCENT       // درصد تخفیف روی سبد
+  FIXED_AMOUNT  // مبلغ ثابت تخفیف (تومان)
+}
+
+model DiscountCode {
+  id     String @id @default(uuid()) @db.Uuid
+  /// کد یکتا (معمولاً uppercase)
+  code   String @unique
+  title  String?
+
+  scope       DiscountCodeScope
+  /// وقتی scope = SINGLE_USER
+  userId      String? @db.Uuid
+  user        User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// وقتی scope = USER_GROUP (جدول گروه بعداً اضافه می‌شود)
+  userGroupId String? @db.Uuid
+
+  valueType      DiscountValueType
+  /// درصد (۱–۱۰۰) یا مبلغ ثابت بسته به valueType
+  value          Decimal @db.Decimal(12, 2)
+  minOrderAmount Decimal? @db.Decimal(12, 2)
+
+  validFrom DateTime
+  validTo   DateTime
+
+  /// حداکثر دفعات استفاده در کل (null = نامحدود)
+  maxTotalUses Int?
+  usedCount    Int  @default(0)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
+
+  @@index([code])
+  @@index([scope])
+  @@index([validFrom, validTo])
+  @@index([userId])
+  @@index([userGroupId])
 }
 
 // ----------------------
@@ -274,6 +328,11 @@ model Order {
   user      User     @relation(fields: [userId], references: [id])
   items     OrderItem[]
   totalAmount Decimal @db.Decimal(10, 2) @default(0)
+  discountCode String?
+  discountAmount Decimal @db.Decimal(10, 2) @default(0)
+  shippingCost Decimal @db.Decimal(10, 2) @default(0)
+  payableAmount Decimal @db.Decimal(10, 2) @default(0)
+  shippingAddress Json? @db.JsonB
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   isDeleted Boolean  @default(false)
