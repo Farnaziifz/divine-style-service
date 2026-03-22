@@ -523,6 +523,7 @@ export class BasketController {
           shippingCost: fromCents(shippingCostCents),
           payableAmount: fromCents(payableCents),
           shippingAddress: selectedAddress,
+          orderStatus: 'PENDING_PAYMENT',
         },
         select: { id: true, orderCode: true },
       });
@@ -598,7 +599,11 @@ export class BasketController {
         }),
         this.prisma.order.update({
           where: { id: baseResult.orderId },
-          data: { paymentStatus: 'PAID', paidAt: new Date() },
+          data: {
+            paymentStatus: 'PAID',
+            orderStatus: 'PAID',
+            paidAt: new Date(),
+          },
         }),
       ]);
 

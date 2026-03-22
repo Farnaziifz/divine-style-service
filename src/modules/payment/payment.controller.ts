@@ -73,7 +73,11 @@ export class PaymentController {
       }),
       this.prisma.order.update({
         where: { id: orderId },
-        data: { paymentStatus: 'PAID', paidAt: new Date() },
+        data: {
+          paymentStatus: 'PAID',
+          orderStatus: 'PAID',
+          paidAt: new Date(),
+        },
       }),
     ]);
 

@@ -355,6 +355,15 @@ enum PaymentTransactionStatus {
   FAILED
 }
 
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  CONFIRMED
+  SHIPPED
+  DELIVERED
+  CANCELED
+}
+
 model Order {
   id        String   @id @default(uuid()) @db.Uuid
   orderCode String   @unique
@@ -368,6 +377,7 @@ model Order {
   payableAmount Decimal @db.Decimal(10, 2) @default(0)
   shippingAddress Json? @db.JsonB
   paymentStatus PaymentStatus @default(PENDING)
+  orderStatus OrderStatus @default(PENDING_PAYMENT)
   paidAt DateTime?
   payments PaymentTransaction[]
   createdAt DateTime @default(now())
