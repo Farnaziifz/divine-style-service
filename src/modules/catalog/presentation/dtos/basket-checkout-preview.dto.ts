@@ -11,4 +11,3 @@ export class BasketCheckoutPreviewDto {
   @IsString()
   discountCode?: string;
 }
-

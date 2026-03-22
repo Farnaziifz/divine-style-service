@@ -12,13 +12,13 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  DiscountCodeScope,
-  DiscountValueType,
-} from '@prisma/client';
+import { DiscountCodeScope, DiscountValueType } from '@prisma/client';
 
 export class CreateDiscountCodeDto {
-  @ApiProperty({ example: 'SUMMER1404', description: 'کد یکتا (به صورت خودکار uppercase می‌شود)' })
+  @ApiProperty({
+    example: 'SUMMER1404',
+    description: 'کد یکتا (به صورت خودکار uppercase می‌شود)',
+  })
   @IsString()
   @IsNotEmpty()
   code: string;
@@ -60,7 +60,10 @@ export class CreateDiscountCodeDto {
   @IsNumber()
   value: number;
 
-  @ApiPropertyOptional({ example: 500000, description: 'حداقل مبلغ سبد برای اعمال کد' })
+  @ApiPropertyOptional({
+    example: 500000,
+    description: 'حداقل مبلغ سبد برای اعمال کد',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

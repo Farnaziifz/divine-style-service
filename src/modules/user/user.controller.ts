@@ -79,7 +79,10 @@ export class UserController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'افزودن آدرس جدید برای کاربر' })
   @ApiResponse({ status: 201, description: 'آدرس با موفقیت اضافه شد' })
-  addMyAddress(@Req() req: any, @Body() createUserAddressDto: CreateUserAddressDto) {
+  addMyAddress(
+    @Req() req: any,
+    @Body() createUserAddressDto: CreateUserAddressDto,
+  ) {
     return this.userService.addMyAddress(req.user.id, createUserAddressDto);
   }
 

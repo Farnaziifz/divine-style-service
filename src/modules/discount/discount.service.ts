@@ -37,10 +37,14 @@ export class DiscountService {
     }
     if (dto.scope === DiscountCodeScope.SINGLE_USER) {
       if (!dto.userId) {
-        throw new BadRequestException('برای تخفیف تک‌کاربره، userId الزامی است');
+        throw new BadRequestException(
+          'برای تخفیف تک‌کاربره، userId الزامی است',
+        );
       }
       if (dto.userGroupId) {
-        throw new BadRequestException('برای تخفیف تک‌کاربره نباید userGroupId ارسال شود');
+        throw new BadRequestException(
+          'برای تخفیف تک‌کاربره نباید userGroupId ارسال شود',
+        );
       }
     }
     if (dto.scope === DiscountCodeScope.USER_GROUP) {
@@ -50,7 +54,9 @@ export class DiscountService {
         );
       }
       if (dto.userId) {
-        throw new BadRequestException('برای تخفیف گروهی نباید userId ارسال شود');
+        throw new BadRequestException(
+          'برای تخفیف گروهی نباید userId ارسال شود',
+        );
       }
     }
   }
@@ -79,6 +85,36 @@ export class DiscountService {
       value: dc.value.toNumber(),
       minOrderAmount: dc.minOrderAmount?.toNumber() ?? null,
     };
+  }
+
+  /**
+   * محاسبه مبلغ تخفیف به «سنت» (همان مقیاس subtotalCents در سبد: مبلغ × ۱۰۰).
+   * - PERCENT: درصد از جمع سبد
+   * - FIXED_AMOUNT: مبلغ ثابت به همان واحد قیمت محصول (مثلاً تومان)
+   */
+  computeDiscountAmountCents(
+    subtotalCents: number,
+    valueType: DiscountValueType,
+    value: Prisma.Decimal,
+  ): number {
+    const v = value.toNumber();
+    let discountCents = 0;
+
+    if (valueType === DiscountValueType.PERCENT) {
+      discountCents = Math.round((subtotalCents * v) / 100);
+    } else if (valueType === DiscountValueType.FIXED_AMOUNT) {
+      discountCents = Math.round(v * 100);
+    } else {
+      throw new BadRequestException('نوع تخفیف پشتیبانی نمی‌شود');
+    }
+
+    if (discountCents < 0) {
+      discountCents = 0;
+    }
+    if (discountCents > subtotalCents) {
+      discountCents = subtotalCents;
+    }
+    return discountCents;
   }
 
   async create(dto: CreateDiscountCodeDto) {
@@ -288,7 +324,9 @@ export class DiscountService {
     const updated = await this.prisma.discountCode.update({
       where: { id },
       data: {
-        ...(dto.code !== undefined ? { code: this.normalizeCode(dto.code) } : {}),
+        ...(dto.code !== undefined
+          ? { code: this.normalizeCode(dto.code) }
+          : {}),
         ...(dto.title !== undefined
           ? { title: dto.title?.trim() || null }
           : {}),

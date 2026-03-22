@@ -13,6 +13,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
+import { DiscountService } from '../../../discount/discount.service';
 import { UpsertBasketItemDto } from '../dtos/upsert-basket-item.dto';
 import { UpdateBasketItemDto } from '../dtos/update-basket-item.dto';
 import { BasketCheckoutPreviewDto } from '../dtos/basket-checkout-preview.dto';
@@ -45,7 +46,10 @@ function fromCents(cents: number): number {
 @ApiTags('Basket')
 @Controller('basket')
 export class BasketController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly discountService: DiscountService,
+  ) {}
 
   private async getOrCreateActiveBasket(userId: string) {
     const existing = await this.prisma.tempBasket.findFirst({
@@ -222,9 +226,12 @@ export class BasketController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Checkout preview (server-side price verification + discount validation)',
+    summary: 'Checkout preview',
   })
-  async checkoutPreview(@Req() req: any, @Body() dto: BasketCheckoutPreviewDto) {
+  async checkoutPreview(
+    @Req() req: any,
+    @Body() dto: BasketCheckoutPreviewDto,
+  ) {
     const userId = req.user.id;
     const now = new Date();
 
@@ -253,7 +260,9 @@ export class BasketController {
       where: { id: userId },
       select: { addresses: true },
     });
-    const addresses = Array.isArray(user?.addresses) ? (user?.addresses as any[]) : [];
+    const addresses = Array.isArray(user?.addresses)
+      ? (user?.addresses as any[])
+      : [];
     const selectedAddress = addresses.find((a) => a?.id === dto.addressId);
     if (!selectedAddress) throw new BadRequestException('Address not found');
 
@@ -283,31 +292,44 @@ export class BasketController {
         throw new BadRequestException('کد تخفیف معتبر نیست');
       }
 
-      if (discount.maxTotalUses != null && discount.usedCount >= discount.maxTotalUses) {
+      if (
+        discount.maxTotalUses != null &&
+        discount.usedCount >= discount.maxTotalUses
+      ) {
         throw new BadRequestException('کد تخفیف معتبر نیست');
       }
 
-      if (discount.scope === 'SINGLE_USER' && discount.userId && discount.userId !== userId) {
+      if (discount.scope === 'USER_GROUP') {
+        throw new BadRequestException(
+          'کدهای تخفیف گروهی هنوز فعال نیستند',
+        );
+      }
+
+      if (
+        discount.scope === 'SINGLE_USER' &&
+        discount.userId &&
+        discount.userId !== userId
+      ) {
         throw new BadRequestException('کد تخفیف معتبر نیست');
       }
 
-      const minOrder = discount.minOrderAmount != null ? toCents(discount.minOrderAmount) : null;
+      const minOrder =
+        discount.minOrderAmount != null
+          ? toCents(discount.minOrderAmount)
+          : null;
       if (minOrder != null && subtotalCents < minOrder) {
         throw new BadRequestException('کد تخفیف معتبر نیست');
       }
 
-      if (discount.valueType === 'PERCENT') {
-        const percent = toNumber(discount.value);
-        discountAmountCents = Math.round((subtotalCents * percent) / 100);
-      } else {
-        discountAmountCents = toCents(discount.value);
-      }
-
-      if (discountAmountCents < 0) discountAmountCents = 0;
-      if (discountAmountCents > subtotalCents) discountAmountCents = subtotalCents;
+      discountAmountCents = this.discountService.computeDiscountAmountCents(
+        subtotalCents,
+        discount.valueType,
+        discount.value,
+      );
     }
 
-    const payableCents = subtotalCents - discountAmountCents + shippingCostCents;
+    const payableCents =
+      subtotalCents - discountAmountCents + shippingCostCents;
 
     return {
       subtotal: fromCents(subtotalCents),
@@ -355,7 +377,9 @@ export class BasketController {
         where: { id: userId },
         select: { addresses: true },
       });
-      const addresses = Array.isArray(user?.addresses) ? (user?.addresses as any[]) : [];
+      const addresses = Array.isArray(user?.addresses)
+        ? (user?.addresses as any[])
+        : [];
       const selectedAddress = addresses.find((a) => a?.id === dto.addressId);
       if (!selectedAddress) throw new BadRequestException('Address not found');
 
@@ -367,7 +391,9 @@ export class BasketController {
 
       const shippingCostCents = 0;
       const discountCodeRaw = dto.discountCode?.trim();
-      const discountCode = discountCodeRaw ? discountCodeRaw.toUpperCase() : null;
+      const discountCode = discountCodeRaw
+        ? discountCodeRaw.toUpperCase()
+        : null;
       let discountAmountCents = 0;
 
       if (discountCode) {
@@ -385,28 +411,40 @@ export class BasketController {
           throw new BadRequestException('کد تخفیف معتبر نیست');
         }
 
-        if (discount.maxTotalUses != null && discount.usedCount >= discount.maxTotalUses) {
+        if (
+          discount.maxTotalUses != null &&
+          discount.usedCount >= discount.maxTotalUses
+        ) {
           throw new BadRequestException('کد تخفیف معتبر نیست');
         }
 
-        if (discount.scope === 'SINGLE_USER' && discount.userId && discount.userId !== userId) {
+        if (discount.scope === 'USER_GROUP') {
+          throw new BadRequestException(
+            'کدهای تخفیف گروهی هنوز فعال نیستند',
+          );
+        }
+
+        if (
+          discount.scope === 'SINGLE_USER' &&
+          discount.userId &&
+          discount.userId !== userId
+        ) {
           throw new BadRequestException('کد تخفیف معتبر نیست');
         }
 
-        const minOrder = discount.minOrderAmount != null ? toCents(discount.minOrderAmount) : null;
+        const minOrder =
+          discount.minOrderAmount != null
+            ? toCents(discount.minOrderAmount)
+            : null;
         if (minOrder != null && subtotalCents < minOrder) {
           throw new BadRequestException('کد تخفیف معتبر نیست');
         }
 
-        if (discount.valueType === 'PERCENT') {
-          const percent = toNumber(discount.value);
-          discountAmountCents = Math.round((subtotalCents * percent) / 100);
-        } else {
-          discountAmountCents = toCents(discount.value);
-        }
-
-        if (discountAmountCents < 0) discountAmountCents = 0;
-        if (discountAmountCents > subtotalCents) discountAmountCents = subtotalCents;
+        discountAmountCents = this.discountService.computeDiscountAmountCents(
+          subtotalCents,
+          discount.valueType,
+          discount.value,
+        );
 
         if (discount.maxTotalUses != null) {
           const updated = await tx.discountCode.updateMany({
@@ -418,7 +456,9 @@ export class BasketController {
             },
             data: { usedCount: { increment: 1 } },
           });
-          if (updated.count === 0) throw new BadRequestException('کد تخفیف معتبر نیست');
+          if (updated.count === 0) {
+            throw new BadRequestException('کد تخفیف معتبر نیست');
+          }
         } else {
           await tx.discountCode.update({
             where: { code: discountCode },
@@ -427,7 +467,8 @@ export class BasketController {
         }
       }
 
-      const payableCents = subtotalCents - discountAmountCents + shippingCostCents;
+      const payableCents =
+        subtotalCents - discountAmountCents + shippingCostCents;
 
       const order = await tx.order.create({
         data: {
