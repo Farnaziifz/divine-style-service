@@ -1,6 +1,9 @@
 import {
   Controller,
+  Delete,
   Get,
+  Patch,
+  Post,
   Put,
   Body,
   UseGuards,
@@ -14,10 +17,15 @@ import { AuthGuard } from '@nestjs/passport';
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiResponse,
   ApiTags,
   ApiQuery,
 } from '@nestjs/swagger';
+import {
+  CreateUserAddressDto,
+  UpdateUserAddressDto,
+} from './dtos/user-address.dto';
 
 @ApiTags('User')
 @Controller('user')
@@ -55,6 +63,52 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'پروفایل با موفقیت ویرایش شد' })
   updateProfile(@Req() req: any, @Body() updateUserDto: UpdateUserDto) {
     return this.userService.updateProfile(req.user.id, updateUserDto);
+  }
+
+  @Get('profile/addresses')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'دریافت لیست آدرس‌های کاربر' })
+  @ApiResponse({ status: 200, description: 'لیست آدرس‌ها دریافت شد' })
+  getMyAddresses(@Req() req: any) {
+    return this.userService.getMyAddresses(req.user.id);
+  }
+
+  @Post('profile/addresses')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'افزودن آدرس جدید برای کاربر' })
+  @ApiResponse({ status: 201, description: 'آدرس با موفقیت اضافه شد' })
+  addMyAddress(@Req() req: any, @Body() createUserAddressDto: CreateUserAddressDto) {
+    return this.userService.addMyAddress(req.user.id, createUserAddressDto);
+  }
+
+  @Patch('profile/addresses/:addressId')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'ویرایش آدرس کاربر' })
+  @ApiParam({ name: 'addressId', type: String })
+  @ApiResponse({ status: 200, description: 'آدرس با موفقیت ویرایش شد' })
+  updateMyAddress(
+    @Req() req: any,
+    @Param('addressId') addressId: string,
+    @Body() updateUserAddressDto: UpdateUserAddressDto,
+  ) {
+    return this.userService.updateMyAddress(
+      req.user.id,
+      addressId,
+      updateUserAddressDto,
+    );
+  }
+
+  @Delete('profile/addresses/:addressId')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'حذف آدرس کاربر' })
+  @ApiParam({ name: 'addressId', type: String })
+  @ApiResponse({ status: 200, description: 'آدرس با موفقیت حذف شد' })
+  deleteMyAddress(@Req() req: any, @Param('addressId') addressId: string) {
+    return this.userService.deleteMyAddress(req.user.id, addressId);
   }
 
   @Get('list')
