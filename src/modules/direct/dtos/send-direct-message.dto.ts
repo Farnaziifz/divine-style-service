@@ -12,4 +12,3 @@ export class SendDirectMessageDto {
   @IsIn(['IMAGE', 'AUDIO'])
   attachmentType?: 'IMAGE' | 'AUDIO';
 }
-

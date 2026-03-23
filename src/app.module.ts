@@ -11,6 +11,7 @@ import { ShoppingListModule } from './modules/shopping-list/shopping-list.module
 import { DiscountModule } from './modules/discount/discount.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { SiteSettingsModule } from './modules/site-settings/site-settings.module';
+import { DirectModule } from './modules/direct/direct.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { SiteSettingsModule } from './modules/site-settings/site-settings.module
     DiscountModule,
     PaymentModule,
     SiteSettingsModule,
+    DirectModule,
   ],
   controllers: [AppController],
   providers: [AppService],
