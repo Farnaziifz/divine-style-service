@@ -22,6 +22,9 @@ import { PrismaService } from '../shared/prisma/prisma.service';
 import { MinioService } from '../shared/minio/minio.service';
 import { SendDirectMessageDto } from './dtos/send-direct-message.dto';
 
+const MAX_DIRECT_IMAGE_SIZE_BYTES = 3 * 1024 * 1024;
+const MAX_DIRECT_AUDIO_SIZE_BYTES = 10 * 1024 * 1024;
+
 @ApiTags('Direct')
 @Controller('direct')
 export class DirectController {
@@ -122,6 +125,22 @@ export class DirectController {
     if (file) {
       const type = dto.attachmentType;
       if (!type) throw new BadRequestException('نوع فایل مشخص نیست');
+      if (type === 'IMAGE') {
+        if (!file.mimetype?.startsWith('image/')) {
+          throw new BadRequestException('نوع فایل عکس معتبر نیست');
+        }
+        if (file.size > MAX_DIRECT_IMAGE_SIZE_BYTES) {
+          throw new BadRequestException('حداکثر حجم عکس ۳ مگابایت است');
+        }
+      }
+      if (type === 'AUDIO') {
+        if (!file.mimetype?.startsWith('audio/')) {
+          throw new BadRequestException('نوع فایل صوتی معتبر نیست');
+        }
+        if (file.size > MAX_DIRECT_AUDIO_SIZE_BYTES) {
+          throw new BadRequestException('حداکثر حجم فایل صوتی ۱۰ مگابایت است');
+        }
+      }
       attachmentType = type;
       const folder = type === 'AUDIO' ? 'direct-audio' : 'direct-images';
       attachmentUrl = await this.minio.uploadFile(file, folder);

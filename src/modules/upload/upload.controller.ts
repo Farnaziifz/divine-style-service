@@ -23,6 +23,8 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { MinioService } from '../shared/minio/minio.service';
 
+const MAX_IMAGE_SIZE_BYTES = 3 * 1024 * 1024;
+
 @ApiTags('Upload')
 @Controller('upload')
 export class UploadController {
@@ -58,6 +60,12 @@ export class UploadController {
   async uploadFile(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('فایل الزامی است');
+    }
+    if (!file.mimetype?.startsWith('image/')) {
+      throw new BadRequestException('فقط فایل تصویری مجاز است');
+    }
+    if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      throw new BadRequestException('حداکثر حجم عکس ۳ مگابایت است');
     }
     const url = await this.minioService.uploadFile(file, 'uploads');
     return { url };

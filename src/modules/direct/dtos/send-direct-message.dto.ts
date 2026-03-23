@@ -7,7 +7,11 @@ export class SendDirectMessageDto {
   @IsString()
   text?: string;
 
-  @ApiPropertyOptional({ enum: ['IMAGE', 'AUDIO'] })
+  @ApiPropertyOptional({
+    enum: ['IMAGE', 'AUDIO'],
+    description:
+      'برای IMAGE تمام فرمت‌های image/* مجاز است (حداکثر ۳ مگابایت). برای AUDIO فقط audio/* مجاز است (حداکثر ۱۰ مگابایت).',
+  })
   @IsOptional()
   @IsIn(['IMAGE', 'AUDIO'])
   attachmentType?: 'IMAGE' | 'AUDIO';
