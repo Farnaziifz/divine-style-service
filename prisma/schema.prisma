@@ -32,6 +32,8 @@ model User {
   shoppingList ShoppingListItem[]
   discountCodes              DiscountCode[]
   discountCodeEligibilities  DiscountCodeEligibleUser[]
+  directConversation DirectConversation?
+  directMessages     DirectMessage[] @relation("DirectMessageAuthor")
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   isDeleted    Boolean   @default(false)
@@ -172,10 +174,46 @@ model ShippingMethod {
   description String?
   price       Int?
   isActive    Boolean  @default(true)
+  orders      Order[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   isDeleted   Boolean  @default(false)
   deletedAt   DateTime?
+}
+
+model DirectConversation {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @unique @db.Uuid
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userLastReadAt  DateTime?
+  adminLastReadAt DateTime?
+  messages        DirectMessage[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  isDeleted       Boolean  @default(false)
+  deletedAt       DateTime?
+}
+
+enum DirectAttachmentType {
+  IMAGE
+  AUDIO
+}
+
+model DirectMessage {
+  id             String               @id @default(uuid()) @db.Uuid
+  conversationId String               @db.Uuid
+  conversation   DirectConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorRole     Role
+  authorUserId   String?              @db.Uuid
+  authorUser     User?                @relation("DirectMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  text           String?
+  attachmentType DirectAttachmentType?
+  attachmentUrl  String?
+  createdAt      DateTime @default(now())
+  isDeleted      Boolean  @default(false)
+  deletedAt      DateTime?
+
+  @@index([conversationId, createdAt])
 }
 
 // Dynamic Specifications (e.g., Fabric, Care, Origin)
@@ -390,6 +428,10 @@ model Order {
   discountCode String?
   discountAmount Decimal @db.Decimal(10, 2) @default(0)
   shippingCost Decimal @db.Decimal(10, 2) @default(0)
+  shippingMethodId String? @db.Uuid
+  shippingMethod   ShippingMethod? @relation(fields: [shippingMethodId], references: [id], onDelete: SetNull)
+  shippingMethodTitle String?
+  shippingMethodPrice Int?
   payableAmount Decimal @db.Decimal(10, 2) @default(0)
   shippingAddress Json? @db.JsonB
   paymentStatus PaymentStatus @default(PENDING)
@@ -400,6 +442,8 @@ model Order {
   updatedAt DateTime @updatedAt
   isDeleted Boolean  @default(false)
   deletedAt DateTime?
+
+  @@index([shippingMethodId])
 }
 
 model OrderComment {

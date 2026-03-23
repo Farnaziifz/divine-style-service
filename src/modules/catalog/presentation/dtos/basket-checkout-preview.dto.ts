@@ -8,6 +8,11 @@ export class BasketCheckoutPreviewDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @IsUUID()
+  shippingMethodId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
   discountCode?: string;
 }

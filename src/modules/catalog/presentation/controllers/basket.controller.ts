@@ -278,7 +278,15 @@ export class BasketController {
       return sum + toCents(unit) * item.quantity;
     }, 0);
 
-    const shippingCostCents = 0;
+    let shippingCostCents = 0;
+    if (dto.shippingMethodId) {
+      const method = await this.prisma.shippingMethod.findFirst({
+        where: { id: dto.shippingMethodId, isDeleted: false, isActive: true },
+        select: { price: true },
+      });
+      if (!method) throw new BadRequestException('روش ارسال معتبر نیست');
+      shippingCostCents = toCents(method.price ?? 0);
+    }
     const discountCodeRaw = dto.discountCode?.trim();
     const discountCode = discountCodeRaw ? discountCodeRaw.toUpperCase() : null;
     let discountAmountCents = 0;
@@ -403,7 +411,21 @@ export class BasketController {
         return sum + toCents(unit) * item.quantity;
       }, 0);
 
-      const shippingCostCents = 0;
+      let shippingCostCents = 0;
+      let shippingMethodId: string | null = null;
+      let shippingMethodTitle: string | null = null;
+      let shippingMethodPrice: number | null = null;
+      if (dto.shippingMethodId) {
+        const method = await tx.shippingMethod.findFirst({
+          where: { id: dto.shippingMethodId, isDeleted: false, isActive: true },
+          select: { id: true, title: true, price: true },
+        });
+        if (!method) throw new BadRequestException('روش ارسال معتبر نیست');
+        shippingCostCents = toCents(method.price ?? 0);
+        shippingMethodId = method.id;
+        shippingMethodTitle = method.title;
+        shippingMethodPrice = method.price ?? null;
+      }
       const discountCodeRaw = dto.discountCode?.trim();
       const discountCode = discountCodeRaw
         ? discountCodeRaw.toUpperCase()
@@ -521,6 +543,9 @@ export class BasketController {
           discountCode,
           discountAmount: fromCents(discountAmountCents),
           shippingCost: fromCents(shippingCostCents),
+          shippingMethodId,
+          shippingMethodTitle,
+          shippingMethodPrice,
           payableAmount: fromCents(payableCents),
           shippingAddress: selectedAddress,
           orderStatus: 'PENDING_PAYMENT',

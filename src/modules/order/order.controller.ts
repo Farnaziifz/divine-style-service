@@ -141,6 +141,14 @@ export class OrderController {
         discountCode: o.discountCode,
         discountAmount: this.toNumber(o.discountAmount),
         shippingCost: this.toNumber(o.shippingCost),
+        shippingMethodId: o.shippingMethodId ?? null,
+        shippingMethodTitle: o.shippingMethodTitle ?? null,
+        shippingMethodPrice:
+          typeof o.shippingMethodPrice === 'number'
+            ? o.shippingMethodPrice
+            : o.shippingMethodPrice != null
+              ? this.toNumber(o.shippingMethodPrice)
+              : null,
         payableAmount: this.toNumber(o.payableAmount),
         shippingAddress: o.shippingAddress,
         createdAt: o.createdAt,
@@ -266,6 +274,14 @@ export class OrderController {
       discountCode: order.discountCode,
       discountAmount: this.toNumber(order.discountAmount),
       shippingCost: this.toNumber(order.shippingCost),
+      shippingMethodId: order.shippingMethodId ?? null,
+      shippingMethodTitle: order.shippingMethodTitle ?? null,
+      shippingMethodPrice:
+        typeof order.shippingMethodPrice === 'number'
+          ? order.shippingMethodPrice
+          : order.shippingMethodPrice != null
+            ? this.toNumber(order.shippingMethodPrice)
+            : null,
       payableAmount: this.toNumber(order.payableAmount),
       shippingAddress: order.shippingAddress,
       createdAt: order.createdAt,
