@@ -13,6 +13,7 @@ import {
   UseInterceptors,
   UploadedFile,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -95,28 +96,44 @@ export class AdminDirectController {
       },
     });
 
-    const unreadCounts = await Promise.all(
-      conversations.map(async (c) => {
-        const since = c.adminLastReadAt ?? new Date(0);
-        const count = await this.prisma.directMessage.count({
-          where: {
-            conversationId: c.id,
-            isDeleted: false,
-            authorRole: 'USER',
-            createdAt: { gt: since },
-          },
-        });
-        return count;
-      }),
-    );
+    const conversationIds = conversations.map((c) => c.id);
+    const unreadByConversation = new Map<string, number>();
 
-    return conversations.map((c, idx) => {
+    if (conversationIds.length > 0) {
+      const conversationIdSql = conversationIds.map(
+        (id) => Prisma.sql`${id}::uuid`,
+      );
+      const rows = await this.prisma.$queryRaw<
+        { conversationId: string; unreadCount: number }[]
+      >(Prisma.sql`
+        SELECT
+          dc.id AS "conversationId",
+          COUNT(dm.id)::int AS "unreadCount"
+        FROM "DirectConversation" dc
+        LEFT JOIN "DirectMessage" dm
+          ON dm."conversationId" = dc.id
+          AND dm."isDeleted" = false
+          AND dm."authorRole" = 'USER'
+          AND dm."createdAt" > COALESCE(dc."adminLastReadAt", TO_TIMESTAMP(0))
+        WHERE dc.id IN (${Prisma.join(conversationIdSql)})
+        GROUP BY dc.id
+      `);
+
+      for (const row of rows) {
+        unreadByConversation.set(
+          row.conversationId,
+          Number(row.unreadCount) || 0,
+        );
+      }
+    }
+
+    return conversations.map((c) => {
       const last = c.messages[0] ?? null;
       return {
         id: c.id,
         user: c.user,
         updatedAt: c.updatedAt,
-        unreadCount: unreadCounts[idx] ?? 0,
+        unreadCount: unreadByConversation.get(c.id) ?? 0,
         lastMessage: last
           ? {
               id: last.id,

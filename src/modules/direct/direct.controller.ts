@@ -31,18 +31,13 @@ export class DirectController {
   ) {}
 
   private async getOrCreateConversation(userId: string) {
-    const existing = await this.prisma.directConversation.findFirst({
-      where: { userId, isDeleted: false },
-      select: {
-        id: true,
-        userId: true,
-        userLastReadAt: true,
-        adminLastReadAt: true,
+    return this.prisma.directConversation.upsert({
+      where: { userId },
+      create: { userId },
+      update: {
+        isDeleted: false,
+        deletedAt: null,
       },
-    });
-    if (existing) return existing;
-    return this.prisma.directConversation.create({
-      data: { userId },
       select: {
         id: true,
         userId: true,

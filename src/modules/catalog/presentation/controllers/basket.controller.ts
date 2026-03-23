@@ -374,6 +374,43 @@ export class BasketController {
     const now = new Date();
 
     const baseResult = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`checkout:${userId}`}))`;
+
+      const reusable = await tx.paymentTransaction.findFirst({
+        where: {
+          isDeleted: false,
+          provider: 'ZARINPAL',
+          status: 'INITIATED',
+          order: {
+            isDeleted: false,
+            userId,
+            paymentStatus: 'PENDING',
+            orderStatus: 'PENDING_PAYMENT',
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          order: {
+            select: {
+              id: true,
+              orderCode: true,
+              payableAmount: true,
+            },
+          },
+        },
+      });
+
+      if (reusable?.order) {
+        return {
+          orderId: reusable.order.id,
+          orderCode: reusable.order.orderCode,
+          payableAmount: Number(reusable.order.payableAmount),
+          paymentTransactionId: reusable.id,
+          authority: reusable.authority,
+          reused: true,
+        };
+      }
+
       const basket = await tx.tempBasket.findFirst({
         where: { userId, isDeleted: false },
         orderBy: { createdAt: 'desc' },
@@ -516,6 +553,22 @@ export class BasketController {
       const payableCents =
         subtotalCents - discountAmountCents + shippingCostCents;
 
+      for (const item of basket.items) {
+        const reserved = await tx.productVariant.updateMany({
+          where: {
+            id: item.productVariantId,
+            isDeleted: false,
+            stock: { gte: item.quantity },
+          },
+          data: {
+            stock: { decrement: item.quantity },
+          },
+        });
+        if (reserved.count === 0) {
+          throw new BadRequestException('موجودی محصول کافی نیست');
+        }
+      }
+
       const nowLocal = new Date();
       const y = nowLocal.getFullYear();
       const m = pad2(nowLocal.getMonth() + 1);
@@ -597,8 +650,20 @@ export class BasketController {
         orderCode: order.orderCode,
         payableAmount: fromCents(payableCents),
         paymentTransactionId: payment.id,
+        authority: null as string | null,
+        reused: false,
       };
     });
+
+    if (baseResult.reused && baseResult.authority) {
+      return {
+        orderId: baseResult.orderId,
+        orderCode: baseResult.orderCode,
+        payableAmount: baseResult.payableAmount,
+        paymentStatus: 'PENDING',
+        paymentUrl: `https://www.zarinpal.com/pg/StartPay/${baseResult.authority}`,
+      };
+    }
 
     const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:3005';
     const callbackUrl = `${backendUrl}/payments/zarinpal/callback?lang=fa`;
@@ -613,8 +678,8 @@ export class BasketController {
 
     if (requested.isMock) {
       await this.prisma.$transaction([
-        this.prisma.paymentTransaction.update({
-          where: { id: baseResult.paymentTransactionId },
+        this.prisma.paymentTransaction.updateMany({
+          where: { id: baseResult.paymentTransactionId, status: 'INITIATED' },
           data: {
             authority: requested.authority,
             status: 'PAID',
@@ -622,8 +687,8 @@ export class BasketController {
             verifiedAt: new Date(),
           },
         }),
-        this.prisma.order.update({
-          where: { id: baseResult.orderId },
+        this.prisma.order.updateMany({
+          where: { id: baseResult.orderId, paymentStatus: 'PENDING' },
           data: {
             paymentStatus: 'PAID',
             orderStatus: 'PAID',
@@ -641,8 +706,8 @@ export class BasketController {
       };
     }
 
-    await this.prisma.paymentTransaction.update({
-      where: { id: baseResult.paymentTransactionId },
+    await this.prisma.paymentTransaction.updateMany({
+      where: { id: baseResult.paymentTransactionId, status: 'INITIATED' },
       data: { authority: requested.authority },
     });
 

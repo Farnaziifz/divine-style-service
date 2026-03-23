@@ -23,68 +23,103 @@ export class PaymentController {
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
     const language = lang || 'fa';
 
-    const tx = await this.prisma.paymentTransaction.findFirst({
-      where: { authority, isDeleted: false },
-      include: { order: true },
-    });
+    const callbackResult = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`zarinpal-callback:${authority}`}))`;
 
-    if (!tx) {
-      return res.redirect(`${frontendUrl}/${language}/payment/failed`);
-    }
+      const current = await tx.paymentTransaction.findFirst({
+        where: { authority, isDeleted: false },
+        include: { order: true },
+      });
 
-    const orderId = tx.orderId;
-    const orderCode = tx.order?.orderCode;
+      if (!current) {
+        return {
+          redirect: `${frontendUrl}/${language}/payment/failed`,
+        };
+      }
 
-    if (status !== 'OK') {
-      await this.prisma.$transaction([
-        this.prisma.paymentTransaction.update({
-          where: { id: tx.id },
+      const orderId = current.orderId;
+      const orderCode = current.order?.orderCode || orderId;
+
+      if (
+        current.status === 'PAID' ||
+        current.order?.paymentStatus === 'PAID'
+      ) {
+        return {
+          redirect: `${frontendUrl}/${language}/payment/success?orderCode=${encodeURIComponent(orderCode)}`,
+        };
+      }
+
+      if (status !== 'OK') {
+        const paymentUpdated = await tx.paymentTransaction.updateMany({
+          where: { id: current.id, status: 'INITIATED' },
           data: {
             status: 'FAILED',
             verifiedAt: new Date(),
           },
-        }),
-        this.prisma.order.update({
-          where: { id: orderId },
+        });
+        await tx.order.updateMany({
+          where: { id: orderId, paymentStatus: 'PENDING' },
           data: { paymentStatus: 'FAILED' },
-        }),
-      ]);
-      return res.redirect(
-        `${frontendUrl}/${language}/payment/failed?orderCode=${encodeURIComponent(
-          orderCode || orderId,
-        )}`,
-      );
-    }
+        });
 
-    const amountToman = Math.round(Number(tx.amount));
-    const verified = await this.paymentService.verifyZarinpalPayment({
-      authority,
-      amountToman,
-    });
+        if (paymentUpdated.count > 0) {
+          const orderItems = await tx.orderItem.findMany({
+            where: { orderId, isDeleted: false },
+            select: { productVariantId: true, quantity: true },
+          });
 
-    await this.prisma.$transaction([
-      this.prisma.paymentTransaction.update({
-        where: { id: tx.id },
+          const quantityByVariant = new Map<string, number>();
+          for (const item of orderItems) {
+            quantityByVariant.set(
+              item.productVariantId,
+              (quantityByVariant.get(item.productVariantId) ?? 0) +
+                item.quantity,
+            );
+          }
+
+          for (const [
+            productVariantId,
+            quantity,
+          ] of quantityByVariant.entries()) {
+            await tx.productVariant.updateMany({
+              where: { id: productVariantId, isDeleted: false },
+              data: { stock: { increment: quantity } },
+            });
+          }
+        }
+        return {
+          redirect: `${frontendUrl}/${language}/payment/failed?orderCode=${encodeURIComponent(orderCode)}`,
+        };
+      }
+
+      const amountToman = Math.round(Number(current.amount));
+      const verified = await this.paymentService.verifyZarinpalPayment({
+        authority,
+        amountToman,
+      });
+
+      await tx.paymentTransaction.updateMany({
+        where: { id: current.id, status: 'INITIATED' },
         data: {
           status: 'PAID',
           refId: verified.refId || null,
           verifiedAt: new Date(),
         },
-      }),
-      this.prisma.order.update({
-        where: { id: orderId },
+      });
+      await tx.order.updateMany({
+        where: { id: orderId, paymentStatus: 'PENDING' },
         data: {
           paymentStatus: 'PAID',
           orderStatus: 'PAID',
           paidAt: new Date(),
         },
-      }),
-    ]);
+      });
 
-    return res.redirect(
-      `${frontendUrl}/${language}/payment/success?orderCode=${encodeURIComponent(
-        orderCode || orderId,
-      )}`,
-    );
+      return {
+        redirect: `${frontendUrl}/${language}/payment/success?orderCode=${encodeURIComponent(orderCode)}`,
+      };
+    });
+
+    return res.redirect(callbackResult.redirect);
   }
 }
