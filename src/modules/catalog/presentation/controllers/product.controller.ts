@@ -8,6 +8,8 @@ import {
   Delete,
   UseGuards,
   Query,
+  Req,
+  ForbiddenException,
 } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -31,11 +33,23 @@ export class ProductController {
     private readonly minioService: MinioService,
   ) {}
 
+  private assertCanWrite(req: any) {
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isOperatorWithPermission =
+      req.user?.role === 'OPERATOR' &&
+      Array.isArray(req.user?.permissions) &&
+      req.user.permissions.includes('PRODUCTS_WRITE');
+    if (!isAdmin && !isOperatorWithPermission) {
+      throw new ForbiddenException();
+    }
+  }
+
   @Post()
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create product' })
-  async create(@Body() createProductDto: CreateProductDto) {
+  async create(@Req() req: any, @Body() createProductDto: CreateProductDto) {
+    this.assertCanWrite(req);
     return this.commandBus.execute(
       new CreateProductCommand(createProductDto, createProductDto.images),
     );
@@ -59,8 +73,10 @@ export class ProductController {
   @ApiOperation({ summary: 'Update product' })
   async update(
     @Param('id') id: string,
+    @Req() req: any,
     @Body() updateProductDto: UpdateProductDto,
   ) {
+    this.assertCanWrite(req);
     return this.commandBus.execute(
       new UpdateProductCommand(id, updateProductDto, updateProductDto.images),
     );
@@ -70,7 +86,8 @@ export class ProductController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete product' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id') id: string, @Req() req: any) {
+    this.assertCanWrite(req);
     return this.commandBus.execute(new DeleteProductCommand(id));
   }
 }

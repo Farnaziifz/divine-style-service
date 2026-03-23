@@ -7,6 +7,8 @@ import {
   Param,
   Delete,
   UseGuards,
+  Req,
+  ForbiddenException,
 } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -26,11 +28,23 @@ export class CatalogSpecificationController {
     private readonly queryBus: QueryBus,
   ) {}
 
+  private assertCanWrite(req: any) {
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isOperatorWithPermission =
+      req.user?.role === 'OPERATOR' &&
+      Array.isArray(req.user?.permissions) &&
+      req.user.permissions.includes('PRODUCTS_WRITE');
+    if (!isAdmin && !isOperatorWithPermission) {
+      throw new ForbiddenException();
+    }
+  }
+
   @Post()
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create specification key' })
-  create(@Body() createDto: CreateSpecificationKeyDto) {
+  create(@Req() req: any, @Body() createDto: CreateSpecificationKeyDto) {
+    this.assertCanWrite(req);
     return this.commandBus.execute(
       new CreateSpecificationKeyCommand(createDto),
     );
@@ -53,8 +67,10 @@ export class CatalogSpecificationController {
   @ApiOperation({ summary: 'Update specification key' })
   async update(
     @Param('id') id: string,
+    @Req() req: any,
     @Body() updateDto: UpdateSpecificationKeyDto,
   ) {
+    this.assertCanWrite(req);
     console.log('Controller: Update spec called', id, updateDto);
     try {
       const result = await this.commandBus.execute(
@@ -72,7 +88,8 @@ export class CatalogSpecificationController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete specification key' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id') id: string, @Req() req: any) {
+    this.assertCanWrite(req);
     return this.commandBus.execute(new DeleteSpecificationKeyCommand(id));
   }
 }

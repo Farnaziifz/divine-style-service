@@ -23,6 +23,7 @@ model User {
   job          String?
   addresses    Json?     @db.JsonB
   role         Role      @default(USER)
+  permissions  String[]  @default([])
   hashedRefreshToken String? // For Refresh Token mechanism
   reviews      ProductReview[]
   orders       Order[]
@@ -48,6 +49,7 @@ model Otp {
 enum Role {
   USER
   ADMIN
+  OPERATOR
 }
 
 // ----------------------
@@ -162,6 +164,18 @@ model Size {
   updatedAt DateTime @updatedAt
   isDeleted Boolean  @default(false)
   deletedAt DateTime?
+}
+
+model ShippingMethod {
+  id          String   @id @default(uuid()) @db.Uuid
+  title       String
+  description String?
+  price       Int?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  isDeleted   Boolean  @default(false)
+  deletedAt   DateTime?
 }
 
 // Dynamic Specifications (e.g., Fabric, Care, Origin)

@@ -1,6 +1,7 @@
 import {
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Patch,
   Post,
@@ -14,6 +15,7 @@ import {
 import { UserService } from './user.service';
 import { UpdateUserDto } from './dtos/update-user.dto';
 import { AuthGuard } from '@nestjs/passport';
+import { UpdateUserAccessDto } from './dtos/update-user-access.dto';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -31,6 +33,17 @@ import {
 @Controller('user')
 export class UserController {
   constructor(private readonly userService: UserService) {}
+
+  private assertCanManageUsers(req: any) {
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isOperatorWithPermission =
+      req.user?.role === 'OPERATOR' &&
+      Array.isArray(req.user?.permissions) &&
+      req.user.permissions.includes('USERS_MANAGE');
+    if (!isAdmin && !isOperatorWithPermission) {
+      throw new ForbiddenException();
+    }
+  }
 
   @Get('testimonials')
   @ApiOperation({
@@ -130,12 +143,14 @@ export class UserController {
   })
   @ApiResponse({ status: 200, description: 'لیست کاربران دریافت شد' })
   findAll(
+    @Req() req: any,
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
     @Query('name') name?: string,
     @Query('mobile') mobile?: string,
     @Query('excludeAdmin') excludeAdmin?: string,
   ) {
+    this.assertCanManageUsers(req);
     const exclude =
       excludeAdmin === 'true' || excludeAdmin === '1' || excludeAdmin === 'yes';
     return this.userService.findAll(
@@ -152,7 +167,22 @@ export class UserController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'دریافت جزئیات کاربر' })
   @ApiResponse({ status: 200, description: 'جزئیات کاربر دریافت شد' })
-  findOne(@Param('id') id: string) {
+  findOne(@Req() req: any, @Param('id') id: string) {
+    this.assertCanManageUsers(req);
     return this.userService.getProfile(id);
+  }
+
+  @Patch(':id/access')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'ادمین: تغییر نقش/دسترسی‌های کاربر' })
+  @ApiResponse({ status: 200, description: 'دسترسی کاربر بروزرسانی شد' })
+  updateAccess(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserAccessDto,
+  ) {
+    this.assertCanManageUsers(req);
+    return this.userService.updateAccess(id, dto);
   }
 }

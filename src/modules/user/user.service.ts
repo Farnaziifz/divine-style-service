@@ -3,6 +3,7 @@ import { Role } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { UpdateUserDto } from './dtos/update-user.dto';
 import { PaginatedResult } from '../shared/interfaces/paginated-result.interface';
+import { UpdateUserAccessDto } from './dtos/update-user-access.dto';
 import {
   CreateUserAddressDto,
   UpdateUserAddressDto,
@@ -301,5 +302,39 @@ export class UserService {
         limit,
       },
     };
+  }
+
+  async updateAccess(userId: string, dto: UpdateUserAccessDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('کاربر یافت نشد');
+    }
+
+    const nextRole = dto.role ?? user.role;
+    const nextPermissions =
+      nextRole === Role.OPERATOR
+        ? Array.isArray(dto.permissions)
+          ? dto.permissions
+          : user.permissions
+        : [];
+
+    const data: any = {};
+    if (dto.role) {
+      data.role = dto.role;
+    }
+    if (dto.permissions) {
+      data.permissions = nextRole === Role.OPERATOR ? nextPermissions : [];
+    } else if (dto.role && nextRole !== Role.OPERATOR) {
+      data.permissions = [];
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data,
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { password, hashedRefreshToken, ...result } = updated;
+    return result;
   }
 }

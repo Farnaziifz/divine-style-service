@@ -8,6 +8,8 @@ import {
   Delete,
   UseGuards,
   Query,
+  Req,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
@@ -29,11 +31,23 @@ export class CollectionController {
     private readonly queryBus: QueryBus,
   ) {}
 
+  private assertCanWrite(req: any) {
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isOperatorWithPermission =
+      req.user?.role === 'OPERATOR' &&
+      Array.isArray(req.user?.permissions) &&
+      req.user.permissions.includes('PRODUCTS_WRITE');
+    if (!isAdmin && !isOperatorWithPermission) {
+      throw new ForbiddenException();
+    }
+  }
+
   @Post()
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create collection' })
-  create(@Body() createCollectionDto: CreateCollectionDto) {
+  create(@Req() req: any, @Body() createCollectionDto: CreateCollectionDto) {
+    this.assertCanWrite(req);
     return this.commandBus.execute(
       new CreateCollectionCommand(createCollectionDto),
     );
@@ -57,8 +71,10 @@ export class CollectionController {
   @ApiOperation({ summary: 'Update collection' })
   update(
     @Param('id') id: string,
+    @Req() req: any,
     @Body() updateCollectionDto: UpdateCollectionDto,
   ) {
+    this.assertCanWrite(req);
     return this.commandBus.execute(
       new UpdateCollectionCommand(id, updateCollectionDto),
     );
@@ -68,7 +84,8 @@ export class CollectionController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete collection' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id') id: string, @Req() req: any) {
+    this.assertCanWrite(req);
     return this.commandBus.execute(new DeleteCollectionCommand(id));
   }
 }

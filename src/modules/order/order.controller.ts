@@ -23,6 +23,26 @@ import { UpdateOrderStatusDto } from './dtos/update-order-status.dto';
 export class OrderController {
   constructor(private readonly prisma: PrismaService) {}
 
+  private hasPermission(user: any, permission: string) {
+    return (
+      Array.isArray(user?.permissions) && user.permissions.includes(permission)
+    );
+  }
+
+  private canReadAllOrders(user: any) {
+    return (
+      user?.role === 'ADMIN' ||
+      (user?.role === 'OPERATOR' && this.hasPermission(user, 'ORDERS_READ'))
+    );
+  }
+
+  private canWriteOrders(user: any) {
+    return (
+      user?.role === 'ADMIN' ||
+      (user?.role === 'OPERATOR' && this.hasPermission(user, 'ORDERS_WRITE'))
+    );
+  }
+
   private toNumber(value: any): number {
     if (typeof value === 'number') return value;
     if (typeof value === 'string') {
@@ -51,7 +71,7 @@ export class OrderController {
     const skip = (page - 1) * limit;
 
     const where: any = { isDeleted: false };
-    if (req.user?.role !== 'ADMIN') {
+    if (!this.canReadAllOrders(req.user)) {
       where.userId = req.user.id;
     }
     const query = (q ?? '').trim();
@@ -162,7 +182,7 @@ export class OrderController {
   @ApiOperation({ summary: 'Get order details by order code' })
   async findOneByCode(@Req() req: any, @Param('orderCode') orderCode: string) {
     const where: any = { isDeleted: false, orderCode };
-    if (req.user?.role !== 'ADMIN') {
+    if (!this.canReadAllOrders(req.user)) {
       where.userId = req.user.id;
     }
 
@@ -292,7 +312,7 @@ export class OrderController {
   @ApiOperation({ summary: 'List order comments by order code' })
   async listComments(@Req() req: any, @Param('orderCode') orderCode: string) {
     const whereOrder: any = { isDeleted: false, orderCode };
-    if (req.user?.role !== 'ADMIN') {
+    if (!this.canReadAllOrders(req.user)) {
       whereOrder.userId = req.user.id;
     }
 
@@ -340,7 +360,7 @@ export class OrderController {
     @Body() dto: CreateOrderCommentDto,
   ) {
     const whereOrder: any = { isDeleted: false, orderCode };
-    if (req.user?.role !== 'ADMIN') {
+    if (!this.canReadAllOrders(req.user)) {
       whereOrder.userId = req.user.id;
     }
 
@@ -408,7 +428,7 @@ export class OrderController {
     @Param('orderCode') orderCode: string,
     @Body() dto: UpdateOrderStatusDto,
   ) {
-    if (req.user?.role !== 'ADMIN') {
+    if (!this.canWriteOrders(req.user)) {
       throw new BadRequestException('Forbidden');
     }
 

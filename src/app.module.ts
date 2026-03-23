@@ -10,6 +10,7 @@ import { OrderModule } from './modules/order/order.module';
 import { ShoppingListModule } from './modules/shopping-list/shopping-list.module';
 import { DiscountModule } from './modules/discount/discount.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { SiteSettingsModule } from './modules/site-settings/site-settings.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { PaymentModule } from './modules/payment/payment.module';
     ShoppingListModule,
     DiscountModule,
     PaymentModule,
+    SiteSettingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

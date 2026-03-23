@@ -2,11 +2,13 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -28,36 +30,56 @@ import { DiscountCodeQueryDto } from './dtos/discount-code-query.dto';
 export class DiscountController {
   constructor(private readonly discountService: DiscountService) {}
 
+  private assertCanWrite(req: any) {
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isOperatorWithPermission =
+      req.user?.role === 'OPERATOR' &&
+      Array.isArray(req.user?.permissions) &&
+      req.user.permissions.includes('DISCOUNTS_WRITE');
+    if (!isAdmin && !isOperatorWithPermission) {
+      throw new ForbiddenException();
+    }
+  }
+
   @Post()
   @ApiOperation({ summary: 'ایجاد کد تخفیف' })
-  create(@Body() dto: CreateDiscountCodeDto) {
+  create(@Req() req: any, @Body() dto: CreateDiscountCodeDto) {
+    this.assertCanWrite(req);
     return this.discountService.create(dto);
   }
 
   @Get()
   @ApiOperation({ summary: 'لیست کدهای تخفیف (صفحه‌بندی)' })
-  findAll(@Query() query: DiscountCodeQueryDto) {
+  findAll(@Req() req: any, @Query() query: DiscountCodeQueryDto) {
+    this.assertCanWrite(req);
     return this.discountService.findAll(query);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'جزئیات یک کد تخفیف' })
   @ApiParam({ name: 'id', type: String })
-  findOne(@Param('id') id: string) {
+  findOne(@Req() req: any, @Param('id') id: string) {
+    this.assertCanWrite(req);
     return this.discountService.findOne(id);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'ویرایش کد تخفیف' })
   @ApiParam({ name: 'id', type: String })
-  update(@Param('id') id: string, @Body() dto: UpdateDiscountCodeDto) {
+  update(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateDiscountCodeDto,
+  ) {
+    this.assertCanWrite(req);
     return this.discountService.update(id, dto);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'حذف نرم کد تخفیف' })
   @ApiParam({ name: 'id', type: String })
-  remove(@Param('id') id: string) {
+  remove(@Req() req: any, @Param('id') id: string) {
+    this.assertCanWrite(req);
     return this.discountService.remove(id);
   }
 }

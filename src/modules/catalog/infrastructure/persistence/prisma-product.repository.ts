@@ -11,14 +11,37 @@ import { PaginatedResult } from '../../../shared/interfaces/paginated-result.int
 export class PrismaProductRepository implements IProductRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async ensureUniqueSlug(baseSlug: string): Promise<string> {
+    const normalized = (baseSlug || '').trim();
+    if (!normalized) {
+      return randomUUID().slice(0, 8);
+    }
+
+    let candidate = normalized;
+    let i = 2;
+    // slug is unique in DB, so findUnique is safe & fast
+    // keep trying until we find a free slug; fallback to random after a reasonable amount
+    while (
+      await this.prisma.product.findUnique({ where: { slug: candidate } })
+    ) {
+      candidate = `${normalized}-${i}`;
+      i += 1;
+      if (i > 50) {
+        return `${normalized}-${randomUUID().slice(0, 6)}`;
+      }
+    }
+    return candidate;
+  }
+
   async create(
     data: CreateProductDto & { slug: string; images: string[] },
   ): Promise<Product> {
     const { collectionIds, variants, slug, ...rest } = data;
+    const uniqueSlug = await this.ensureUniqueSlug(slug);
     return this.prisma.product.create({
       data: {
         ...rest,
-        slug,
+        slug: uniqueSlug,
         collections: collectionIds
           ? {
               connect: collectionIds.map((id) => ({ id })),
@@ -28,7 +51,7 @@ export class PrismaProductRepository implements IProductRepository {
           ? {
               create: variants.map((variant) => ({
                 // SKU یکتا در کل دیتابیس تا تداخل با محصولات دیگر نباشد
-                sku: `${slug}-${randomUUID().slice(0, 8)}`,
+                sku: `${uniqueSlug}-${randomUUID().slice(0, 8)}`,
                 discountPercent: variant.discountPercent ?? undefined,
                 size: variant.size,
                 color: variant.color,
@@ -161,34 +184,123 @@ export class PrismaProductRepository implements IProductRepository {
       };
     }
 
-    if (variants) {
-      updateData.variants = {
-        deleteMany: {},
-        create: variants.map((variant: any) => ({
-          sku: `${id.slice(0, 8)}-${randomUUID().slice(0, 8)}`,
-          size: variant.size,
-          color: variant.color,
-          colorCode: variant.colorCode,
-          price: variant.price,
-          discountPercent: variant.discountPercent ?? undefined,
-          discountPrice:
-            typeof variant.discountPercent === 'number' &&
-            variant.discountPercent > 0
-              ? Math.round(
-                  ((variant.price * (100 - variant.discountPercent)) / 100) *
-                    100,
-                ) / 100
-              : variant.discountPrice,
-          stock: variant.stock,
-          specifications: variant.specifications ?? undefined,
-        })),
-      };
+    if (!variants) {
+      return this.prisma.product.update({
+        where: { id },
+        data: updateData,
+      });
     }
 
-    return this.prisma.product.update({
+    const product = await this.prisma.product.findFirst({
       where: { id },
-      data: updateData,
+      select: { id: true, slug: true },
     });
+    if (!product) {
+      throw new Error('Product not found');
+    }
+
+    const existingVariants = await this.prisma.productVariant.findMany({
+      where: { productId: id },
+      select: { sku: true },
+    });
+    const existingSkuSet = new Set(existingVariants.map((v) => v.sku));
+
+    const incoming = (variants as any[]).map((v) => ({
+      sku: typeof v.sku === 'string' && v.sku.trim() ? v.sku.trim() : null,
+      size: v.size ?? undefined,
+      color: v.color ?? undefined,
+      colorCode: v.colorCode ?? undefined,
+      price: Number(v.price) || 0,
+      discountPercent:
+        typeof v.discountPercent === 'number'
+          ? v.discountPercent
+          : v.discountPercent != null
+            ? Number(v.discountPercent) || undefined
+            : undefined,
+      discountPrice:
+        typeof v.discountPrice === 'number'
+          ? v.discountPrice
+          : v.discountPrice != null
+            ? Number(v.discountPrice) || undefined
+            : undefined,
+      stock: Number(v.stock) || 0,
+      specifications: v.specifications ?? undefined,
+    }));
+
+    const skusToKeep = new Set(
+      incoming
+        .map((v) => v.sku)
+        .filter((sku): sku is string => !!sku && existingSkuSet.has(sku)),
+    );
+    const skusToSoftDelete = existingVariants
+      .map((v) => v.sku)
+      .filter((sku) => !skusToKeep.has(sku));
+
+    const now = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.product.update({
+        where: { id },
+        data: updateData,
+      });
+
+      for (const v of incoming) {
+        const computedDiscountPrice =
+          typeof v.discountPercent === 'number' && v.discountPercent > 0
+            ? Math.round(((v.price * (100 - v.discountPercent)) / 100) * 100) /
+              100
+            : v.discountPrice;
+
+        if (v.sku && existingSkuSet.has(v.sku)) {
+          await tx.productVariant.update({
+            where: { sku: v.sku },
+            data: {
+              size: v.size,
+              color: v.color,
+              colorCode: v.colorCode,
+              price: v.price,
+              discountPercent: v.discountPercent ?? undefined,
+              discountPrice: computedDiscountPrice,
+              stock: v.stock,
+              specifications: v.specifications ?? undefined,
+              isDeleted: false,
+              deletedAt: null,
+            },
+          });
+        } else {
+          await tx.productVariant.create({
+            data: {
+              productId: id,
+              sku: `${product.slug}-${randomUUID().slice(0, 8)}`,
+              size: v.size,
+              color: v.color,
+              colorCode: v.colorCode,
+              price: v.price,
+              discountPercent: v.discountPercent ?? undefined,
+              discountPrice: computedDiscountPrice,
+              stock: v.stock,
+              specifications: v.specifications ?? undefined,
+            },
+          });
+        }
+      }
+
+      if (skusToSoftDelete.length > 0) {
+        await tx.productVariant.updateMany({
+          where: { productId: id, sku: { in: skusToSoftDelete } },
+          data: { isDeleted: true, deletedAt: now },
+        });
+      }
+    });
+
+    return this.prisma.product.findFirst({
+      where: { id },
+      include: {
+        category: true,
+        collections: true,
+        variants: true,
+      },
+    }) as unknown as Product;
   }
 
   async remove(id: string): Promise<Product> {

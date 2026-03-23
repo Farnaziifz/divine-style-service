@@ -10,6 +10,8 @@ import {
   UseInterceptors,
   UploadedFile,
   Query,
+  Req,
+  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
@@ -39,6 +41,17 @@ export class CategoryController {
     private readonly minioService: MinioService,
   ) {}
 
+  private assertCanWrite(req: any) {
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isOperatorWithPermission =
+      req.user?.role === 'OPERATOR' &&
+      Array.isArray(req.user?.permissions) &&
+      req.user.permissions.includes('PRODUCTS_WRITE');
+    if (!isAdmin && !isOperatorWithPermission) {
+      throw new ForbiddenException();
+    }
+  }
+
   @Post()
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
@@ -46,9 +59,11 @@ export class CategoryController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('image'))
   async create(
+    @Req() req: any,
     @Body() createCategoryDto: CreateCategoryDto,
     @UploadedFile() file: Express.Multer.File,
   ) {
+    this.assertCanWrite(req);
     if (file) {
       const image = await this.minioService.uploadFile(file, 'categories');
       createCategoryDto.image = image;
@@ -78,9 +93,11 @@ export class CategoryController {
   @UseInterceptors(FileInterceptor('image'))
   async update(
     @Param('id') id: string,
+    @Req() req: any,
     @Body() updateCategoryDto: UpdateCategoryDto,
     @UploadedFile() file: Express.Multer.File,
   ) {
+    this.assertCanWrite(req);
     if (file) {
       const image = await this.minioService.uploadFile(file, 'categories');
       updateCategoryDto.image = image;
@@ -94,7 +111,8 @@ export class CategoryController {
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete category' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id') id: string, @Req() req: any) {
+    this.assertCanWrite(req);
     return this.commandBus.execute(new DeleteCategoryCommand(id));
   }
 }
