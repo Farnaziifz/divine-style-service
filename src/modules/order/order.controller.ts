@@ -65,6 +65,7 @@ export class OrderController {
     @Req() req: any,
     @Query() pagination: PaginationDto,
     @Query('q') q?: string,
+    @Query('userId') userId?: string,
   ) {
     const page = pagination.page ?? 1;
     const limit = pagination.limit ?? 10;
@@ -73,6 +74,8 @@ export class OrderController {
     const where: any = { isDeleted: false };
     if (!this.canReadAllOrders(req.user)) {
       where.userId = req.user.id;
+    } else if (userId) {
+      where.userId = userId;
     }
     const query = (q ?? '').trim();
     if (query) {

@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   UnauthorizedException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
@@ -13,6 +14,75 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
   ) {}
+
+  private getSmsConfig() {
+    const apiKey = process.env.SMS_IR_API_KEY?.trim() || '';
+    const verifyUrl =
+      process.env.SMS_IR_VERIFY_URL?.trim() ||
+      'https://api.sms.ir/v1/send/verify';
+    const templateId = Number(process.env.SMS_IR_VERIFY_TEMPLATE_ID || '123456');
+    const enabled = (process.env.SMS_PROVIDER || 'sms_ir').toLowerCase() === 'sms_ir';
+    const logOtpOnly = (process.env.SMS_LOG_OTP_ONLY || 'false').toLowerCase() === 'true';
+    const debugReturnCode =
+      (process.env.OTP_DEBUG_RETURN_CODE || 'false').toLowerCase() === 'true';
+    return { apiKey, verifyUrl, templateId, enabled, logOtpOnly, debugReturnCode };
+  }
+
+  private async sendOtpViaSmsIr(mobile: string, code: string) {
+    const { apiKey, verifyUrl, templateId, enabled, logOtpOnly } =
+      this.getSmsConfig();
+
+    // For local development without provider setup
+    if (!enabled || logOtpOnly || !apiKey) {
+      console.log(`OTP for ${mobile}: ${code}`);
+      return;
+    }
+
+    const payload = {
+      mobile,
+      templateId,
+      parameters: [
+        {
+          name: 'Code',
+          value: code,
+        },
+      ],
+    };
+
+    let res: Response;
+    try {
+      res = await fetch(verifyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/plain',
+          'x-api-key': apiKey,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        `ارسال پیامک با خطا مواجه شد: ${String(error)}`,
+      );
+    }
+
+    const text = await res.text();
+    let parsed: any = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = null;
+    }
+
+    const ok = res.ok && parsed && parsed.status === 1;
+    if (!ok) {
+      const msg =
+        parsed?.message || `SMS provider error (${res.status})`;
+      throw new InternalServerErrorException(
+        `ارسال پیامک با خطا مواجه شد: ${msg}`,
+      );
+    }
+  }
 
   async sendOtp(mobile: string) {
     // 1. Validate mobile number (simple check)
@@ -45,8 +115,11 @@ export class AuthService {
     // 4. Set expiration (2 minutes)
     const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
 
-    // 5. Save to Otp table
-    // Delete expired OTPs for this mobile to avoid clutter
+    // 5. Send OTP via SMS provider first (sandbox/production)
+    await this.sendOtpViaSmsIr(mobile, code);
+
+    // 6. Save to Otp table
+    // Delete previous OTPs for this mobile to avoid clutter
     await this.prisma.otp.deleteMany({
       where: { mobile },
     });
@@ -59,11 +132,11 @@ export class AuthService {
       },
     });
 
-    // 6. Log code for dev environment
-    console.log(`OTP for ${mobile}: ${code}`);
-
-    // In dev mode, return the code for testing
-    return { message: 'کد تایید ارسال شد', expiresAt, code };
+    const { debugReturnCode } = this.getSmsConfig();
+    if (debugReturnCode) {
+      return { message: 'کد تایید ارسال شد', expiresAt, code };
+    }
+    return { message: 'کد تایید ارسال شد', expiresAt };
   }
 
   async verifyOtp(mobile: string, code: string) {

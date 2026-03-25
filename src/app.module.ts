@@ -14,6 +14,7 @@ import { DiscountModule } from './modules/discount/discount.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { SiteSettingsModule } from './modules/site-settings/site-settings.module';
 import { DirectModule } from './modules/direct/direct.module';
+import { BlogModule } from './modules/blog/blog.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { DirectModule } from './modules/direct/direct.module';
     PaymentModule,
     SiteSettingsModule,
     DirectModule,
+    BlogModule,
   ],
   controllers: [AppController],
   providers: [
