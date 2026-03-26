@@ -22,6 +22,8 @@ export class AuthService {
       'https://api.sms.ir/v1/send/verify';
     const templateId = Number(process.env.SMS_IR_VERIFY_TEMPLATE_ID || '123456');
     const enabled = (process.env.SMS_PROVIDER || 'sms_ir').toLowerCase() === 'sms_ir';
+    console.log(enabled)
+    
     const logOtpOnly = (process.env.SMS_LOG_OTP_ONLY || 'false').toLowerCase() === 'true';
     const debugReturnCode =
       (process.env.OTP_DEBUG_RETURN_CODE || 'false').toLowerCase() === 'true';
