@@ -15,6 +15,7 @@ import { PaymentModule } from './modules/payment/payment.module';
 import { SiteSettingsModule } from './modules/site-settings/site-settings.module';
 import { DirectModule } from './modules/direct/direct.module';
 import { BlogModule } from './modules/blog/blog.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { BlogModule } from './modules/blog/blog.module';
     SiteSettingsModule,
     DirectModule,
     BlogModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [

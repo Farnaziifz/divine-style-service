@@ -506,6 +506,10 @@ model Order {
   deletedAt DateTime?
 
   @@index([shippingMethodId])
+  @@index([paidAt])
+  @@index([paymentStatus, paidAt])
+  @@index([orderStatus, paidAt])
+  @@index([createdAt])
 }
 
 model OrderComment {
