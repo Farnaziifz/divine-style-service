@@ -3,6 +3,8 @@ WORKDIR /app
 
 RUN npm config set registry https://mirror2.chabokan.net/npm/
 
+ENV PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
+
 RUN mkdir -p /root/.cache/prisma
 COPY prisma/engine-cache/ /root/.cache/prisma/
 
