@@ -1,6 +1,11 @@
 FROM node:20-bullseye-slim AS builder
 WORKDIR /app
 
+RUN npm config set registry https://mirror2.chabokan.net/npm/
+
+RUN mkdir -p /root/.cache/prisma
+COPY prisma/engine-cache/ /root/.cache/prisma/
+
 COPY package.json package-lock.json ./
 RUN npm install
 
