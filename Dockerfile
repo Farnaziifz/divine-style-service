@@ -17,41 +17,55 @@ const path = require('path');
 
 async function main() {
   const { enginesVersion } = require('@prisma/engines-version');
-  const { getBinaryTargetForCurrentPlatform } = require('@prisma/get-platform');
-
-  const binaryTarget = await getBinaryTargetForCurrentPlatform();
-  const cacheDir = path.join('/root/.cache/prisma/master', enginesVersion, binaryTarget);
-  const libSrc = path.join(cacheDir, 'libquery-engine');
-  const schemaSrc = path.join(cacheDir, 'schema-engine');
-
-  if (!fs.existsSync(libSrc) || !fs.existsSync(schemaSrc)) {
-    console.error('Prisma engines not found in cache');
-    console.error('binaryTarget:', binaryTarget);
-    console.error('enginesVersion:', enginesVersion);
-    console.error('expected files:', libSrc, schemaSrc);
-    process.exit(1);
-  }
 
   const prismaPkgDir = path.join(process.cwd(), 'node_modules', 'prisma');
   const enginesPkgDir = path.join(process.cwd(), 'node_modules', '@prisma', 'engines');
 
-  const libFileName = `libquery_engine-${binaryTarget}.so.node`;
-  const schemaFileName = `schema-engine-${binaryTarget}`;
-
-  if (fs.existsSync(prismaPkgDir)) {
-    fs.copyFileSync(libSrc, path.join(prismaPkgDir, libFileName));
-    fs.copyFileSync(schemaSrc, path.join(prismaPkgDir, schemaFileName));
-    try {
-      fs.chmodSync(path.join(prismaPkgDir, schemaFileName), 0o755);
-    } catch {}
+  const enginesRoot = path.join('/root/.cache/prisma/master', enginesVersion);
+  if (!fs.existsSync(enginesRoot)) {
+    console.error('Prisma engines cache root not found:', enginesRoot);
+    process.exit(1);
   }
 
-  if (fs.existsSync(enginesPkgDir)) {
-    fs.copyFileSync(libSrc, path.join(enginesPkgDir, libFileName));
-    fs.copyFileSync(schemaSrc, path.join(enginesPkgDir, schemaFileName));
-    try {
-      fs.chmodSync(path.join(enginesPkgDir, schemaFileName), 0o755);
-    } catch {}
+  const binaryTargets = fs
+    .readdirSync(enginesRoot, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+
+  if (binaryTargets.length === 0) {
+    console.error('No Prisma engine binaries found under:', enginesRoot);
+    process.exit(1);
+  }
+
+  for (const binaryTarget of binaryTargets) {
+    const cacheDir = path.join(enginesRoot, binaryTarget);
+    const libSrc = path.join(cacheDir, 'libquery-engine');
+    const schemaSrc = path.join(cacheDir, 'schema-engine');
+
+    if (!fs.existsSync(libSrc) || !fs.existsSync(schemaSrc)) {
+      console.error('Prisma engines incomplete for target:', binaryTarget);
+      console.error('expected:', libSrc, schemaSrc);
+      process.exit(1);
+    }
+
+    const libFileName = `libquery_engine-${binaryTarget}.so.node`;
+    const schemaFileName = `schema-engine-${binaryTarget}`;
+
+    if (fs.existsSync(prismaPkgDir)) {
+      fs.copyFileSync(libSrc, path.join(prismaPkgDir, libFileName));
+      fs.copyFileSync(schemaSrc, path.join(prismaPkgDir, schemaFileName));
+      try {
+        fs.chmodSync(path.join(prismaPkgDir, schemaFileName), 0o755);
+      } catch {}
+    }
+
+    if (fs.existsSync(enginesPkgDir)) {
+      fs.copyFileSync(libSrc, path.join(enginesPkgDir, libFileName));
+      fs.copyFileSync(schemaSrc, path.join(enginesPkgDir, schemaFileName));
+      try {
+        fs.chmodSync(path.join(enginesPkgDir, schemaFileName), 0o755);
+      } catch {}
+    }
   }
 }
 
