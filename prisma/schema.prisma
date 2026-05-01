@@ -446,6 +446,13 @@ model SiteTestimonial {
   deletedAt  DateTime?
 }
 
+model SiteSetting {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // Placeholder for Order
 enum PaymentStatus {
   PENDING

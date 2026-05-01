@@ -36,6 +36,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - .env
     environment:
       NODE_ENV: production
       PORT: 3005
@@ -58,4 +60,3 @@ services:
 volumes:
   postgres_data:
   minio_data:
-

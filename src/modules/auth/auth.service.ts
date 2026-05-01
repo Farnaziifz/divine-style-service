@@ -20,24 +20,58 @@ export class AuthService {
     const verifyUrl =
       process.env.SMS_IR_VERIFY_URL?.trim() ||
       'https://api.sms.ir/v1/send/verify';
-    const templateId = Number(process.env.SMS_IR_VERIFY_TEMPLATE_ID || '123456');
-    const enabled = (process.env.SMS_PROVIDER || 'sms_ir').toLowerCase() === 'sms_ir';
-    console.log(enabled, 'sh')
-    
-    const logOtpOnly = (process.env.SMS_LOG_OTP_ONLY || 'false').toLowerCase() === 'true';
+    const templateId = Number(
+      (process.env.SMS_IR_VERIFY_TEMPLATE_ID || '0').trim(),
+    );
+    const logOtpOnly =
+      (process.env.SMS_LOG_OTP_ONLY || 'false').toLowerCase() === 'true';
     const debugReturnCode =
       (process.env.OTP_DEBUG_RETURN_CODE || 'false').toLowerCase() === 'true';
-    return { apiKey, verifyUrl, templateId, enabled, logOtpOnly, debugReturnCode };
+    return {
+      apiKey,
+      verifyUrl,
+      templateId,
+      logOtpOnly,
+      debugReturnCode,
+    };
+  }
+
+  private async getOtpProvider(): Promise<'ussdpanel' | 'sms_ir'> {
+    try {
+      const setting = await this.prisma.siteSetting.findUnique({
+        where: { key: 'OTP_PROVIDER' },
+        select: { value: true },
+      });
+      if (setting?.value === 'sms_ir' || setting?.value === 'ussdpanel') {
+        return setting.value as 'sms_ir' | 'ussdpanel';
+      }
+    } catch {
+      // ignore
+    }
+
+    const envProvider = (process.env.OTP_PROVIDER || '').trim().toLowerCase();
+    if (envProvider === 'sms_ir') return 'sms_ir';
+    return 'ussdpanel';
   }
 
   private async sendOtpViaSmsIr(mobile: string, code: string) {
-    const { apiKey, verifyUrl, templateId, enabled, logOtpOnly } =
-      this.getSmsConfig();
+    const { apiKey, verifyUrl, templateId, logOtpOnly } = this.getSmsConfig();
 
-    // For local development without provider setup
-    if (!enabled || logOtpOnly || !apiKey) {
+    if (logOtpOnly) {
       console.log(`OTP for ${mobile}: ${code}`);
       return;
+    }
+
+    if (!apiKey) {
+      throw new InternalServerErrorException(
+        'تنظیمات پیامک کامل نیست (SMS_IR_API_KEY)',
+      );
+    }
+
+    if (!Number.isFinite(templateId) || templateId <= 0) {
+      throw new InternalServerErrorException(
+        'تنظیمات پیامک کامل نیست (SMS_IR_VERIFY_TEMPLATE_ID)',
+      );
     }
 
     const payload = {
@@ -57,7 +91,7 @@ export class AuthService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Accept: 'text/plain',
+          Accept: 'application/json, text/plain, */*',
           'x-api-key': apiKey,
         },
         body: JSON.stringify(payload),
@@ -76,10 +110,86 @@ export class AuthService {
       parsed = null;
     }
 
-    const ok = res.ok && parsed && parsed.status === 1;
+    const ok = res.ok && parsed && Number(parsed.status) === 1;
     if (!ok) {
       const msg =
-        parsed?.message || `SMS provider error (${res.status})`;
+        parsed?.message ||
+        (text ? text.slice(0, 200) : '') ||
+        `SMS provider error (${res.status})`;
+      throw new InternalServerErrorException(
+        `ارسال پیامک با خطا مواجه شد: ${msg}`,
+      );
+    }
+  }
+
+  private getUssdPanelConfig() {
+    const apiKey = process.env.USSDPANEL_API_KEY?.trim() || '';
+    const baseUrl =
+      process.env.USSDPANEL_BASE_URL?.trim() ||
+      'https://my.ussdpanel.com/api/OTP/v1';
+    const logOtpOnly =
+      (process.env.SMS_LOG_OTP_ONLY || 'false').toLowerCase() === 'true';
+    return { apiKey, baseUrl, logOtpOnly };
+  }
+
+  private async sendOtpViaUssdPanel(
+    mobile: string,
+    code: string,
+    validTimeMinutes: number,
+  ) {
+    const { apiKey, baseUrl, logOtpOnly } = this.getUssdPanelConfig();
+
+    if (logOtpOnly) {
+      console.log(`OTP for ${mobile}: ${code}`);
+      return;
+    }
+
+    if (!apiKey) {
+      throw new InternalServerErrorException(
+        'تنظیمات پیامک کامل نیست (USSDPANEL_API_KEY)',
+      );
+    }
+
+    const validTime = Math.min(1440, Math.max(1, Math.floor(validTimeMinutes)));
+    const url = `${baseUrl.replace(/\/+$/, '')}/setOTP`;
+
+    const body = new URLSearchParams();
+    body.set('apiKey', apiKey);
+    body.set('mobile', mobile);
+    body.set('OTP', code);
+    body.set('validTime', String(validTime));
+    body.set('type', 'SMS');
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json, text/plain, */*',
+        },
+        body,
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        `ارسال پیامک با خطا مواجه شد: ${String(error)}`,
+      );
+    }
+
+    const text = await res.text();
+    let parsed: any = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = null;
+    }
+
+    const ok = res.ok && parsed && Number(parsed.code) > 100;
+    if (!ok) {
+      const msg =
+        parsed?.message ||
+        (text ? text.slice(0, 200) : '') ||
+        `OTP provider error (${res.status})`;
       throw new InternalServerErrorException(
         `ارسال پیامک با خطا مواجه شد: ${msg}`,
       );
@@ -117,8 +227,13 @@ export class AuthService {
     // 4. Set expiration (2 minutes)
     const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
 
-    // 5. Send OTP via SMS provider first (sandbox/production)
-    await this.sendOtpViaSmsIr(mobile, code);
+    // 5. Send OTP via provider first (sandbox/production)
+    const provider = await this.getOtpProvider();
+    if (provider === 'sms_ir') {
+      await this.sendOtpViaSmsIr(mobile, code);
+    } else {
+      await this.sendOtpViaUssdPanel(mobile, code, 2);
+    }
 
     // 6. Save to Otp table
     // Delete previous OTPs for this mobile to avoid clutter
