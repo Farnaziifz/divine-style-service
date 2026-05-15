@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import * as dns from 'node:dns';
 
 @Injectable()
 export class AuthService {
@@ -140,6 +141,7 @@ export class AuthService {
       templateId,
       logOtpOnly,
       hasApiKey: Boolean(apiKey),
+      dnsServers: dns.getServers?.() ?? [],
     });
 
     if (logOtpOnly) {
@@ -197,6 +199,10 @@ export class AuthService {
       });
       clearTimeout(timeout);
     } catch (error) {
+      this.trace('sms.ir: request failed', {
+        error: this.formatFetchError(error),
+        dnsServers: dns.getServers?.() ?? [],
+      });
       throw new InternalServerErrorException(
         `ارسال پیامک با خطا مواجه شد: ${this.formatFetchError(error)}`,
       );

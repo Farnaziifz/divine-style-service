@@ -54,6 +54,8 @@ services:
     dns:
       - 1.1.1.1
       - 8.8.8.8
+    extra_hosts:
+      - "api.sms.ir:185.211.56.44"
     depends_on:
       postgres:
         condition: service_healthy
