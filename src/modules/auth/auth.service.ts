@@ -3,6 +3,7 @@ import {
   BadRequestException,
   UnauthorizedException,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
@@ -10,10 +11,37 @@ import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
   ) {}
+
+  private isOtpTraceEnabled() {
+    return (process.env.OTP_TRACE || 'false').toLowerCase() === 'true';
+  }
+
+  private maskMobile(mobile: string) {
+    if (!mobile) return mobile;
+    if (mobile.length <= 4) return '****';
+    return `${mobile.slice(0, 4)}****${mobile.slice(-2)}`;
+  }
+
+  private trace(message: string, meta?: Record<string, unknown>) {
+    if (!this.isOtpTraceEnabled()) return;
+    if (!meta) {
+      this.logger.log(`[otp-trace] ${message}`);
+      return;
+    }
+    try {
+      this.logger.log(
+        `[otp-trace] ${message} | ${JSON.stringify(meta).slice(0, 1500)}`,
+      );
+    } catch {
+      this.logger.log(`[otp-trace] ${message}`);
+    }
+  }
 
   private formatFetchError(error: unknown) {
     const err = error as any;
@@ -105,6 +133,13 @@ export class AuthService {
   private async sendOtpViaSmsIr(mobile: string, code: string) {
     const { apiKey, verifyUrl, templateId, logOtpOnly } = this.getSmsConfig();
 
+    this.trace('sms.ir: config loaded', {
+      verifyUrl,
+      templateId,
+      logOtpOnly,
+      hasApiKey: Boolean(apiKey),
+    });
+
     if (logOtpOnly) {
       console.log(`OTP for ${mobile}: ${code}`);
       return;
@@ -137,10 +172,17 @@ export class AuthService {
       ],
     };
 
+    this.trace('sms.ir: prepared request payload', {
+      mobile: this.maskMobile(mobile),
+      templateId,
+      parameters: payload.parameters.map((p) => p.name),
+    });
+
     let res: Response;
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 12_000);
+      this.trace('sms.ir: sending request', { verifyUrl });
       res = await fetch(verifyUrl, {
         method: 'POST',
         headers: {
@@ -159,6 +201,11 @@ export class AuthService {
     }
 
     const text = await res.text();
+    this.trace('sms.ir: response received', {
+      status: res.status,
+      ok: res.ok,
+      bodyPreview: text ? text.slice(0, 350) : '',
+    });
     let parsed: any = null;
     try {
       parsed = text ? JSON.parse(text) : null;
@@ -258,6 +305,8 @@ export class AuthService {
       throw new BadRequestException('شماره موبایل نامعتبر است');
     }
 
+    this.trace('sendOtp: start', { mobile: this.maskMobile(mobile) });
+
     // 2. Check for existing valid OTP
     const existingOtp = await this.prisma.otp.findFirst({
       where: {
@@ -285,6 +334,7 @@ export class AuthService {
 
     // 5. Send OTP via provider first (sandbox/production)
     const provider = await this.getOtpProvider();
+    this.trace('sendOtp: provider resolved', { provider });
     if (provider === 'sms_ir') {
       await this.sendOtpViaSmsIr(mobile, code);
     } else {
