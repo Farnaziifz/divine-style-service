@@ -93,10 +93,11 @@ export class AuthService {
 
   private getSmsConfig() {
     const apiKey = process.env.SMS_IR_API_KEY?.trim() || '';
-    console.log(apiKey)
-    const verifyUrl =
-      process.env.SMS_IR_VERIFY_URL?.trim() ||
-      'https://api.sms.ir/v1/send/verify';
+    const verifyUrlRaw = process.env.SMS_IR_VERIFY_URL?.trim() || '';
+    const verifyUrl = (verifyUrlRaw || 'https://api.sms.ir/v1/send/verify')
+      .trim()
+      .replace(/^['"`\s]+/, '')
+      .replace(/['"`\s]+$/, '');
     const templateId = Number(
       (process.env.SMS_IR_VERIFY_TEMPLATE_ID || '0').trim(),
     );
