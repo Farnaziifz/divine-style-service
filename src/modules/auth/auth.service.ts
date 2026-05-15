@@ -15,6 +15,54 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
+  private formatFetchError(error: unknown) {
+    const err = error as any;
+    const name = typeof err?.name === 'string' ? err.name : 'Error';
+    const message =
+      typeof err?.message === 'string' ? err.message : String(err);
+    const cause = err?.cause;
+    const causeName = typeof cause?.name === 'string' ? cause.name : null;
+    const causeMessage =
+      typeof cause?.message === 'string' ? cause.message : null;
+    const code =
+      typeof cause?.code === 'string'
+        ? cause.code
+        : typeof err?.code === 'string'
+          ? err.code
+          : null;
+    const errno =
+      typeof cause?.errno === 'number'
+        ? String(cause.errno)
+        : typeof err?.errno === 'number'
+          ? String(err.errno)
+          : null;
+    const syscall =
+      typeof cause?.syscall === 'string'
+        ? cause.syscall
+        : typeof err?.syscall === 'string'
+          ? err.syscall
+          : null;
+    const hostname =
+      typeof cause?.hostname === 'string'
+        ? cause.hostname
+        : typeof err?.hostname === 'string'
+          ? err.hostname
+          : null;
+
+    const parts = [
+      `${name}: ${message}`,
+      causeName || causeMessage
+        ? `cause=${causeName ?? 'Error'}:${causeMessage ?? ''}`
+        : null,
+      code ? `code=${code}` : null,
+      errno ? `errno=${errno}` : null,
+      syscall ? `syscall=${syscall}` : null,
+      hostname ? `host=${hostname}` : null,
+    ].filter(Boolean);
+
+    return parts.join(' | ');
+  }
+
   private getSmsConfig() {
     const apiKey = process.env.SMS_IR_API_KEY?.trim() || '';
     const verifyUrl =
@@ -79,6 +127,10 @@ export class AuthService {
       templateId,
       parameters: [
         {
+          name: 'OTP',
+          value: code,
+        },
+        {
           name: 'Code',
           value: code,
         },
@@ -87,6 +139,8 @@ export class AuthService {
 
     let res: Response;
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12_000);
       res = await fetch(verifyUrl, {
         method: 'POST',
         headers: {
@@ -95,10 +149,12 @@ export class AuthService {
           'x-api-key': apiKey,
         },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
     } catch (error) {
       throw new InternalServerErrorException(
-        `ارسال پیامک با خطا مواجه شد: ${String(error)}`,
+        `ارسال پیامک با خطا مواجه شد: ${this.formatFetchError(error)}`,
       );
     }
 
