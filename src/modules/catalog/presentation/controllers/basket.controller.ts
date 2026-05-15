@@ -666,15 +666,83 @@ export class BasketController {
     }
 
     const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:3005';
-    const callbackUrl = `${backendUrl}/payments/zarinpal/callback?lang=fa`;
+    const requestedLangRaw = (dto as any)?.lang?.trim?.();
+    const requestedLang =
+      requestedLangRaw === 'en' || requestedLangRaw === 'fa'
+        ? requestedLangRaw
+        : 'fa';
+    const callbackUrl = `${backendUrl}/payments/zarinpal/callback?lang=${requestedLang}`;
     const amountToman = Math.round(Number(baseResult.payableAmount));
 
-    const requested = await this.paymentService.requestZarinpalPayment({
-      amountToman,
-      description: `Order ${baseResult.orderId}`,
-      callbackUrl,
-      mobile: req.user?.mobile,
-    });
+    let requested: {
+      authority: string;
+      paymentUrl: string | null;
+      isMock: boolean;
+    };
+    try {
+      requested = await this.paymentService.requestZarinpalPayment({
+        amountToman,
+        description: `Order ${baseResult.orderId}`,
+        callbackUrl,
+        mobile: req.user?.mobile,
+      });
+    } catch (e) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.paymentTransaction.updateMany({
+          where: { id: baseResult.paymentTransactionId, status: 'INITIATED' },
+          data: {
+            status: 'FAILED',
+            verifiedAt: new Date(),
+          },
+        });
+        await tx.order.updateMany({
+          where: { id: baseResult.orderId, paymentStatus: 'PENDING' },
+          data: {
+            paymentStatus: 'FAILED',
+            orderStatus: 'CANCELED',
+          },
+        });
+
+        const order = await tx.order.findUnique({
+          where: { id: baseResult.orderId },
+          select: { discountCode: true },
+        });
+        if (order?.discountCode) {
+          await tx.discountCode.updateMany({
+            where: {
+              code: order.discountCode,
+              usedCount: { gt: 0 },
+              isDeleted: false,
+            },
+            data: { usedCount: { decrement: 1 } },
+          });
+        }
+
+        const orderItems = await tx.orderItem.findMany({
+          where: { orderId: baseResult.orderId, isDeleted: false },
+          select: { productVariantId: true, quantity: true },
+        });
+
+        const quantityByVariant = new Map<string, number>();
+        for (const item of orderItems) {
+          quantityByVariant.set(
+            item.productVariantId,
+            (quantityByVariant.get(item.productVariantId) ?? 0) + item.quantity,
+          );
+        }
+
+        for (const [
+          productVariantId,
+          quantity,
+        ] of quantityByVariant.entries()) {
+          await tx.productVariant.updateMany({
+            where: { id: productVariantId, isDeleted: false },
+            data: { stock: { increment: quantity } },
+          });
+        }
+      });
+      throw e;
+    }
 
     if (requested.isMock) {
       await this.prisma.$transaction([

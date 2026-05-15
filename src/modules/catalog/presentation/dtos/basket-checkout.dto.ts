@@ -15,4 +15,9 @@ export class BasketCheckoutDto {
   @IsOptional()
   @IsString()
   discountCode?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  lang?: string;
 }

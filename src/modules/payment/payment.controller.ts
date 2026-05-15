@@ -158,10 +158,21 @@ export class PaymentController {
         });
         await tx.order.updateMany({
           where: { id: orderId, paymentStatus: 'PENDING' },
-          data: { paymentStatus: 'FAILED' },
+          data: { paymentStatus: 'FAILED', orderStatus: 'CANCELED' },
         });
 
         if (paymentUpdated.count > 0) {
+          if (current.order?.discountCode) {
+            await tx.discountCode.updateMany({
+              where: {
+                code: current.order.discountCode,
+                usedCount: { gt: 0 },
+                isDeleted: false,
+              },
+              data: { usedCount: { decrement: 1 } },
+            });
+          }
+
           const orderItems = await tx.orderItem.findMany({
             where: { orderId, isDeleted: false },
             select: { productVariantId: true, quantity: true },
@@ -192,10 +203,66 @@ export class PaymentController {
       }
 
       const amountToman = Math.round(Number(current.amount));
-      const verified = await this.paymentService.verifyZarinpalPayment({
-        authority,
-        amountToman,
-      });
+      let verified: { refId: string };
+      try {
+        verified = await this.paymentService.verifyZarinpalPayment({
+          authority,
+          amountToman,
+        });
+      } catch (e) {
+        const paymentUpdated = await tx.paymentTransaction.updateMany({
+          where: { id: current.id, status: 'INITIATED' },
+          data: {
+            status: 'FAILED',
+            verifiedAt: new Date(),
+          },
+        });
+        await tx.order.updateMany({
+          where: { id: orderId, paymentStatus: 'PENDING' },
+          data: { paymentStatus: 'FAILED', orderStatus: 'CANCELED' },
+        });
+
+        if (paymentUpdated.count > 0) {
+          if (current.order?.discountCode) {
+            await tx.discountCode.updateMany({
+              where: {
+                code: current.order.discountCode,
+                usedCount: { gt: 0 },
+                isDeleted: false,
+              },
+              data: { usedCount: { decrement: 1 } },
+            });
+          }
+
+          const orderItems = await tx.orderItem.findMany({
+            where: { orderId, isDeleted: false },
+            select: { productVariantId: true, quantity: true },
+          });
+
+          const quantityByVariant = new Map<string, number>();
+          for (const item of orderItems) {
+            quantityByVariant.set(
+              item.productVariantId,
+              (quantityByVariant.get(item.productVariantId) ?? 0) +
+                item.quantity,
+            );
+          }
+
+          for (const [
+            productVariantId,
+            quantity,
+          ] of quantityByVariant.entries()) {
+            await tx.productVariant.updateMany({
+              where: { id: productVariantId, isDeleted: false },
+              data: { stock: { increment: quantity } },
+            });
+          }
+        }
+
+        return {
+          redirect: `${frontendUrl}/${language}/payment/failed?orderCode=${encodeURIComponent(orderCode)}`,
+        };
+      }
 
       await tx.paymentTransaction.updateMany({
         where: { id: current.id, status: 'INITIATED' },
