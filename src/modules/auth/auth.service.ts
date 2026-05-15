@@ -93,6 +93,7 @@ export class AuthService {
 
   private getSmsConfig() {
     const apiKey = process.env.SMS_IR_API_KEY?.trim() || '';
+    console.log(apiKey)
     const verifyUrl =
       process.env.SMS_IR_VERIFY_URL?.trim() ||
       'https://api.sms.ir/v1/send/verify';

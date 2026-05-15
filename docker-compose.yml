@@ -50,6 +50,10 @@ services:
       MINIO_SECRET_KEY: minioadmin123
       MINIO_BUCKET_NAME: divine-shop
       PRISMA_SYNC: dbpush
+      OTP_TRACE: "true"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       postgres:
         condition: service_healthy
