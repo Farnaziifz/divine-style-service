@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class BasketCheckoutDto {
   @ApiProperty()
@@ -20,4 +20,10 @@ export class BasketCheckoutDto {
   @IsOptional()
   @IsString()
   lang?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @IsIn(['ZARINPAL', 'ZIBAL'])
+  paymentProvider?: 'ZARINPAL' | 'ZIBAL';
 }

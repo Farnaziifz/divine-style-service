@@ -376,11 +376,79 @@ export class BasketController {
     const baseResult = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`checkout:${userId}`}))`;
 
+      const parseActiveProviders = (
+        raw: string | null | undefined,
+      ): Array<'ZARINPAL' | 'ZIBAL'> => {
+        if (!raw) return ['ZARINPAL'];
+        const trimmed = raw.trim();
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            const normalized = parsed
+              .map((x) => String(x).toUpperCase())
+              .filter((x) => x === 'ZARINPAL' || x === 'ZIBAL') as Array<
+              'ZARINPAL' | 'ZIBAL'
+            >;
+            return normalized.length > 0
+              ? Array.from(new Set(normalized))
+              : ['ZARINPAL'];
+          }
+        } catch {
+          // ignore
+        }
+        const normalized = trimmed
+          .split(',')
+          .map((x) => x.trim().toUpperCase())
+          .filter((x) => x === 'ZARINPAL' || x === 'ZIBAL') as Array<
+          'ZARINPAL' | 'ZIBAL'
+        >;
+        return normalized.length > 0
+          ? Array.from(new Set(normalized))
+          : ['ZARINPAL'];
+      };
+
+      const normalizeDefaultProvider = (
+        active: Array<'ZARINPAL' | 'ZIBAL'>,
+        rawDefault: string | null | undefined,
+      ): 'ZARINPAL' | 'ZIBAL' => {
+        const desired = String(rawDefault ?? '')
+          .trim()
+          .toUpperCase();
+        const fallback = active[0] ?? 'ZARINPAL';
+        if (desired === 'ZARINPAL' || desired === 'ZIBAL') {
+          return active.includes(desired as 'ZARINPAL' | 'ZIBAL')
+            ? (desired as 'ZARINPAL' | 'ZIBAL')
+            : fallback;
+        }
+        return fallback;
+      };
+
+      const activeSetting = await tx.siteSetting.findUnique({
+        where: { key: 'PAYMENT_ACTIVE_PROVIDERS' },
+        select: { value: true },
+      });
+      const defaultSetting = await tx.siteSetting.findUnique({
+        where: { key: 'PAYMENT_DEFAULT_PROVIDER' },
+        select: { value: true },
+      });
+
+      const activeProviders = parseActiveProviders(activeSetting?.value);
+      const defaultProvider = normalizeDefaultProvider(
+        activeProviders,
+        defaultSetting?.value,
+      );
+      const requestedProvider = dto.paymentProvider;
+      const paymentProvider =
+        requestedProvider && activeProviders.includes(requestedProvider)
+          ? requestedProvider
+          : defaultProvider;
+
       const reusable = await tx.paymentTransaction.findFirst({
         where: {
           isDeleted: false,
-          provider: 'ZARINPAL',
+          provider: paymentProvider as any,
           status: 'INITIATED',
+          authority: { not: null },
           order: {
             isDeleted: false,
             userId,
@@ -407,6 +475,7 @@ export class BasketController {
           payableAmount: Number(reusable.order.payableAmount),
           paymentTransactionId: reusable.id,
           authority: reusable.authority,
+          paymentProvider,
           reused: true,
         };
       }
@@ -638,7 +707,7 @@ export class BasketController {
       const payment = await tx.paymentTransaction.create({
         data: {
           orderId: order.id,
-          provider: 'ZARINPAL',
+          provider: paymentProvider as any,
           status: 'INITIATED',
           amount: fromCents(payableCents),
         },
@@ -651,11 +720,24 @@ export class BasketController {
         payableAmount: fromCents(payableCents),
         paymentTransactionId: payment.id,
         authority: null as string | null,
+        paymentProvider,
         reused: false,
       };
     });
 
     if (baseResult.reused && baseResult.authority) {
+      if (baseResult.paymentProvider === 'ZIBAL') {
+        const zibalBase =
+          process.env.ZIBAL_BASE_URL?.trim().replace(/\/+$/, '') ||
+          'https://gateway.zibal.ir';
+        return {
+          orderId: baseResult.orderId,
+          orderCode: baseResult.orderCode,
+          payableAmount: baseResult.payableAmount,
+          paymentStatus: 'PENDING',
+          paymentUrl: `${zibalBase}/start/${encodeURIComponent(baseResult.authority)}`,
+        };
+      }
       return {
         orderId: baseResult.orderId,
         orderCode: baseResult.orderCode,
@@ -671,7 +753,10 @@ export class BasketController {
       requestedLangRaw === 'en' || requestedLangRaw === 'fa'
         ? requestedLangRaw
         : 'fa';
-    const callbackUrl = `${backendUrl}/payments/zarinpal/callback?lang=${requestedLang}`;
+    const callbackUrl =
+      baseResult.paymentProvider === 'ZIBAL'
+        ? `${backendUrl}/payments/zibal/callback?lang=${requestedLang}`
+        : `${backendUrl}/payments/zarinpal/callback?lang=${requestedLang}`;
     const amountToman = Math.round(Number(baseResult.payableAmount));
 
     let requested: {
@@ -680,12 +765,20 @@ export class BasketController {
       isMock: boolean;
     };
     try {
-      requested = await this.paymentService.requestZarinpalPayment({
-        amountToman,
-        description: `Order ${baseResult.orderId}`,
-        callbackUrl,
-        mobile: req.user?.mobile,
-      });
+      if (baseResult.paymentProvider === 'ZIBAL') {
+        requested = await this.paymentService.requestZibalPayment({
+          amountRial: amountToman * 10,
+          description: `Order ${baseResult.orderId}`,
+          callbackUrl,
+        });
+      } else {
+        requested = await this.paymentService.requestZarinpalPayment({
+          amountToman,
+          description: `Order ${baseResult.orderId}`,
+          callbackUrl,
+          mobile: req.user?.mobile,
+        });
+      }
     } catch (e) {
       await this.prisma.$transaction(async (tx) => {
         await tx.paymentTransaction.updateMany({

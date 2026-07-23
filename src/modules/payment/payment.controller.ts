@@ -9,10 +9,84 @@ import { PaymentService } from './payment.service';
 @ApiTags('Payment')
 @Controller('payments')
 export class PaymentController {
+  private readonly providerOptions = ['ZARINPAL', 'ZIBAL'] as const;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentService: PaymentService,
   ) {}
+
+  private parseActiveProviders(
+    raw: string | null | undefined,
+  ): Array<(typeof this.providerOptions)[number]> {
+    if (!raw) return ['ZARINPAL'];
+    const trimmed = raw.trim();
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        const normalized = parsed
+          .map((x) => String(x).toUpperCase())
+          .filter((x) => x === 'ZARINPAL' || x === 'ZIBAL') as Array<
+            (typeof this.providerOptions)[number]
+          >;
+        return normalized.length > 0
+          ? Array.from(new Set(normalized))
+          : ['ZARINPAL'];
+      }
+    } catch {
+      // ignore
+    }
+    const normalized = trimmed
+      .split(',')
+      .map((x) => x.trim().toUpperCase())
+      .filter((x) => x === 'ZARINPAL' || x === 'ZIBAL') as Array<
+        (typeof this.providerOptions)[number]
+      >;
+    return normalized.length > 0
+      ? Array.from(new Set(normalized))
+      : ['ZARINPAL'];
+  }
+
+  private normalizeDefaultProvider(
+    active: Array<(typeof this.providerOptions)[number]>,
+    rawDefault: string | null | undefined,
+  ): (typeof this.providerOptions)[number] {
+    const desired = String(rawDefault ?? '')
+      .trim()
+      .toUpperCase();
+    const fallback = active[0] ?? 'ZARINPAL';
+    if (desired === 'ZARINPAL' || desired === 'ZIBAL') {
+      return active.includes(desired as any) ? (desired as any) : fallback;
+    }
+    return fallback;
+  }
+
+  @Get('providers')
+  @ApiOperation({ summary: 'List active payment providers' })
+  async listPaymentProviders() {
+    const [activeSetting, defaultSetting] = await this.prisma.$transaction([
+      this.prisma.siteSetting.findUnique({
+        where: { key: 'PAYMENT_ACTIVE_PROVIDERS' },
+        select: { value: true },
+      }),
+      this.prisma.siteSetting.findUnique({
+        where: { key: 'PAYMENT_DEFAULT_PROVIDER' },
+        select: { value: true },
+      }),
+    ]);
+
+    const activeProviders = this.parseActiveProviders(activeSetting?.value);
+    const defaultProvider = this.normalizeDefaultProvider(
+      activeProviders,
+      defaultSetting?.value,
+    );
+
+    return {
+      options: this.providerOptions,
+      activeProviders,
+      defaultProvider,
+    };
+  }
 
   private hasPermission(user: any, permission: string) {
     return (
@@ -274,6 +348,186 @@ export class PaymentController {
       });
       await tx.order.updateMany({
         where: { id: orderId, paymentStatus: 'PENDING' },
+        data: {
+          paymentStatus: 'PAID',
+          orderStatus: 'PAID',
+          paidAt: new Date(),
+        },
+      });
+
+      return {
+        redirect: `${frontendUrl}/${language}/payment/success?orderCode=${encodeURIComponent(orderCode)}`,
+      };
+    });
+
+    return res.redirect(callbackResult.redirect);
+  }
+
+  @Get('zibal/callback')
+  @ApiOperation({ summary: 'Zibal callback' })
+  async zibalCallback(
+    @Query('trackId') trackId: string,
+    @Query('success') success: string,
+    @Query('status') status: string,
+    @Query('orderId') _orderId: string,
+    @Query('lang') lang: string,
+    @Res() res: Response,
+  ) {
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+    const language = lang || 'fa';
+
+    const callbackResult = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`zibal-callback:${trackId}`}))`;
+
+      const current = await tx.paymentTransaction.findFirst({
+        where: { authority: trackId, isDeleted: false },
+        include: { order: true },
+      });
+
+      if (!current) {
+        return {
+          redirect: `${frontendUrl}/${language}/payment/failed`,
+        };
+      }
+
+      const currentOrderId = current.orderId;
+      const orderCode = current.order?.orderCode || currentOrderId;
+
+      if (
+        current.status === 'PAID' ||
+        current.order?.paymentStatus === 'PAID'
+      ) {
+        return {
+          redirect: `${frontendUrl}/${language}/payment/success?orderCode=${encodeURIComponent(orderCode)}`,
+        };
+      }
+
+      const callbackSuccess = String(success) === '1' && String(status) === '2';
+      if (!callbackSuccess) {
+        const paymentUpdated = await tx.paymentTransaction.updateMany({
+          where: { id: current.id, status: 'INITIATED' },
+          data: {
+            status: 'FAILED',
+            verifiedAt: new Date(),
+          },
+        });
+        await tx.order.updateMany({
+          where: { id: currentOrderId, paymentStatus: 'PENDING' },
+          data: { paymentStatus: 'FAILED', orderStatus: 'CANCELED' },
+        });
+
+        if (paymentUpdated.count > 0) {
+          if (current.order?.discountCode) {
+            await tx.discountCode.updateMany({
+              where: {
+                code: current.order.discountCode,
+                usedCount: { gt: 0 },
+                isDeleted: false,
+              },
+              data: { usedCount: { decrement: 1 } },
+            });
+          }
+
+          const items = await tx.orderItem.findMany({
+            where: { orderId: currentOrderId, isDeleted: false },
+            select: { productVariantId: true, quantity: true },
+          });
+
+          const quantityByVariant = new Map<string, number>();
+          for (const item of items) {
+            quantityByVariant.set(
+              item.productVariantId,
+              (quantityByVariant.get(item.productVariantId) ?? 0) +
+                item.quantity,
+            );
+          }
+
+          for (const [
+            productVariantId,
+            quantity,
+          ] of quantityByVariant.entries()) {
+            await tx.productVariant.updateMany({
+              where: { id: productVariantId, isDeleted: false },
+              data: { stock: { increment: quantity } },
+            });
+          }
+        }
+
+        return {
+          redirect: `${frontendUrl}/${language}/payment/failed?orderCode=${encodeURIComponent(orderCode)}`,
+        };
+      }
+
+      let verified: { refId: string };
+      try {
+        verified = await this.paymentService.verifyZibalPayment({
+          trackId,
+        });
+      } catch {
+        const paymentUpdated = await tx.paymentTransaction.updateMany({
+          where: { id: current.id, status: 'INITIATED' },
+          data: {
+            status: 'FAILED',
+            verifiedAt: new Date(),
+          },
+        });
+        await tx.order.updateMany({
+          where: { id: currentOrderId, paymentStatus: 'PENDING' },
+          data: { paymentStatus: 'FAILED', orderStatus: 'CANCELED' },
+        });
+
+        if (paymentUpdated.count > 0) {
+          if (current.order?.discountCode) {
+            await tx.discountCode.updateMany({
+              where: {
+                code: current.order.discountCode,
+                usedCount: { gt: 0 },
+                isDeleted: false,
+              },
+              data: { usedCount: { decrement: 1 } },
+            });
+          }
+
+          const items = await tx.orderItem.findMany({
+            where: { orderId: currentOrderId, isDeleted: false },
+            select: { productVariantId: true, quantity: true },
+          });
+
+          const quantityByVariant = new Map<string, number>();
+          for (const item of items) {
+            quantityByVariant.set(
+              item.productVariantId,
+              (quantityByVariant.get(item.productVariantId) ?? 0) +
+                item.quantity,
+            );
+          }
+
+          for (const [
+            productVariantId,
+            quantity,
+          ] of quantityByVariant.entries()) {
+            await tx.productVariant.updateMany({
+              where: { id: productVariantId, isDeleted: false },
+              data: { stock: { increment: quantity } },
+            });
+          }
+        }
+
+        return {
+          redirect: `${frontendUrl}/${language}/payment/failed?orderCode=${encodeURIComponent(orderCode)}`,
+        };
+      }
+
+      await tx.paymentTransaction.updateMany({
+        where: { id: current.id, status: 'INITIATED' },
+        data: {
+          status: 'PAID',
+          refId: verified.refId || null,
+          verifiedAt: new Date(),
+        },
+      });
+      await tx.order.updateMany({
+        where: { id: currentOrderId, paymentStatus: 'PENDING' },
         data: {
           paymentStatus: 'PAID',
           orderStatus: 'PAID',
