@@ -833,6 +833,36 @@ export class BasketController {
             data: { stock: { increment: quantity } },
           });
         }
+
+        const basketToRestore = await tx.tempBasket.findFirst({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (basketToRestore) {
+          await tx.tempBasket.updateMany({
+            where: { id: basketToRestore.id },
+            data: { isDeleted: false, deletedAt: null },
+          });
+          for (const [
+            productVariantId,
+            quantity,
+          ] of quantityByVariant.entries()) {
+            await tx.tempBasketItem.upsert({
+              where: {
+                basketId_productVariantId: {
+                  basketId: basketToRestore.id,
+                  productVariantId,
+                },
+              },
+              update: { isDeleted: false, deletedAt: null, quantity },
+              create: {
+                basketId: basketToRestore.id,
+                productVariantId,
+                quantity,
+              },
+            });
+          }
+        }
       });
       throw e;
     }

@@ -88,6 +88,33 @@ export class PaymentController {
     };
   }
 
+  private async restoreBasketItems(
+    tx: any,
+    userId: string,
+    quantityByVariant: Map<string, number>,
+  ) {
+    const basket = await tx.tempBasket.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!basket) return;
+
+    await tx.tempBasket.updateMany({
+      where: { id: basket.id },
+      data: { isDeleted: false, deletedAt: null },
+    });
+
+    for (const [productVariantId, quantity] of quantityByVariant.entries()) {
+      await tx.tempBasketItem.upsert({
+        where: {
+          basketId_productVariantId: { basketId: basket.id, productVariantId },
+        },
+        update: { isDeleted: false, deletedAt: null, quantity },
+        create: { basketId: basket.id, productVariantId, quantity },
+      });
+    }
+  }
+
   private hasPermission(user: any, permission: string) {
     return (
       Array.isArray(user?.permissions) && user.permissions.includes(permission)
@@ -218,7 +245,7 @@ export class PaymentController {
         current.order?.paymentStatus === 'PAID'
       ) {
         return {
-          redirect: `${frontendUrl}/${language}/payment/success?orderCode=${encodeURIComponent(orderCode)}`,
+          redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
         };
       }
 
@@ -270,9 +297,15 @@ export class PaymentController {
               data: { stock: { increment: quantity } },
             });
           }
+
+          await this.restoreBasketItems(
+            tx,
+            current.order!.userId,
+            quantityByVariant,
+          );
         }
         return {
-          redirect: `${frontendUrl}/${language}/payment/failed?orderCode=${encodeURIComponent(orderCode)}`,
+          redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
         };
       }
 
@@ -331,10 +364,16 @@ export class PaymentController {
               data: { stock: { increment: quantity } },
             });
           }
+
+          await this.restoreBasketItems(
+            tx,
+            current.order!.userId,
+            quantityByVariant,
+          );
         }
 
         return {
-          redirect: `${frontendUrl}/${language}/payment/failed?orderCode=${encodeURIComponent(orderCode)}`,
+          redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
         };
       }
 
@@ -356,7 +395,7 @@ export class PaymentController {
       });
 
       return {
-        redirect: `${frontendUrl}/${language}/payment/success?orderCode=${encodeURIComponent(orderCode)}`,
+        redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
       };
     });
 
@@ -398,7 +437,7 @@ export class PaymentController {
         current.order?.paymentStatus === 'PAID'
       ) {
         return {
-          redirect: `${frontendUrl}/${language}/payment/success?orderCode=${encodeURIComponent(orderCode)}`,
+          redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
         };
       }
 
@@ -451,10 +490,16 @@ export class PaymentController {
               data: { stock: { increment: quantity } },
             });
           }
+
+          await this.restoreBasketItems(
+            tx,
+            current.order!.userId,
+            quantityByVariant,
+          );
         }
 
         return {
-          redirect: `${frontendUrl}/${language}/payment/failed?orderCode=${encodeURIComponent(orderCode)}`,
+          redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
         };
       }
 
@@ -511,10 +556,16 @@ export class PaymentController {
               data: { stock: { increment: quantity } },
             });
           }
+
+          await this.restoreBasketItems(
+            tx,
+            current.order!.userId,
+            quantityByVariant,
+          );
         }
 
         return {
-          redirect: `${frontendUrl}/${language}/payment/failed?orderCode=${encodeURIComponent(orderCode)}`,
+          redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
         };
       }
 
@@ -536,7 +587,7 @@ export class PaymentController {
       });
 
       return {
-        redirect: `${frontendUrl}/${language}/payment/success?orderCode=${encodeURIComponent(orderCode)}`,
+        redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
       };
     });
 
