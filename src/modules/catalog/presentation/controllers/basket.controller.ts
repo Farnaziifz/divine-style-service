@@ -443,12 +443,18 @@ export class BasketController {
           ? requestedProvider
           : defaultProvider;
 
-      const reusable = await tx.paymentTransaction.findFirst({
+      // Every checkout call creates its own order — no reusing a prior gateway
+      // authority (they go stale fast and the gateway rejects old ones as
+      // "expired"). Any earlier attempt by this user still sitting in
+      // PENDING_PAYMENT past this window is abandoned; fail it out and release
+      // its stock/discount before creating the new order below.
+      const STALE_WINDOW_MS = 15 * 60 * 1000;
+      const stalePending = await tx.paymentTransaction.findMany({
         where: {
           isDeleted: false,
           provider: paymentProvider as any,
           status: 'INITIATED',
-          authority: { not: null },
+          createdAt: { lt: new Date(Date.now() - STALE_WINDOW_MS) },
           order: {
             isDeleted: false,
             userId,
@@ -456,28 +462,55 @@ export class BasketController {
             orderStatus: 'PENDING_PAYMENT',
           },
         },
-        orderBy: { createdAt: 'desc' },
         include: {
-          order: {
-            select: {
-              id: true,
-              orderCode: true,
-              payableAmount: true,
-            },
-          },
+          order: { select: { id: true, discountCode: true } },
         },
       });
 
-      if (reusable?.order) {
-        return {
-          orderId: reusable.order.id,
-          orderCode: reusable.order.orderCode,
-          payableAmount: Number(reusable.order.payableAmount),
-          paymentTransactionId: reusable.id,
-          authority: reusable.authority,
-          paymentProvider,
-          reused: true,
-        };
+      for (const stale of stalePending) {
+        if (!stale.order) continue;
+
+        await tx.paymentTransaction.updateMany({
+          where: { id: stale.id, status: 'INITIATED' },
+          data: { status: 'FAILED', verifiedAt: new Date() },
+        });
+        await tx.order.updateMany({
+          where: { id: stale.order.id, paymentStatus: 'PENDING' },
+          data: { paymentStatus: 'FAILED', orderStatus: 'CANCELED' },
+        });
+
+        if (stale.order.discountCode) {
+          await tx.discountCode.updateMany({
+            where: {
+              code: stale.order.discountCode,
+              usedCount: { gt: 0 },
+              isDeleted: false,
+            },
+            data: { usedCount: { decrement: 1 } },
+          });
+        }
+
+        const staleItems = await tx.orderItem.findMany({
+          where: { orderId: stale.order.id, isDeleted: false },
+          select: { productVariantId: true, quantity: true },
+        });
+        const staleQuantityByVariant = new Map<string, number>();
+        for (const item of staleItems) {
+          staleQuantityByVariant.set(
+            item.productVariantId,
+            (staleQuantityByVariant.get(item.productVariantId) ?? 0) +
+              item.quantity,
+          );
+        }
+        for (const [
+          productVariantId,
+          quantity,
+        ] of staleQuantityByVariant.entries()) {
+          await tx.productVariant.updateMany({
+            where: { id: productVariantId, isDeleted: false },
+            data: { stock: { increment: quantity } },
+          });
+        }
       }
 
       const basket = await tx.tempBasket.findFirst({
@@ -719,33 +752,9 @@ export class BasketController {
         orderCode: order.orderCode,
         payableAmount: fromCents(payableCents),
         paymentTransactionId: payment.id,
-        authority: null as string | null,
         paymentProvider,
-        reused: false,
       };
     });
-
-    if (baseResult.reused && baseResult.authority) {
-      if (baseResult.paymentProvider === 'ZIBAL') {
-        const zibalBase =
-          process.env.ZIBAL_BASE_URL?.trim().replace(/\/+$/, '') ||
-          'https://gateway.zibal.ir';
-        return {
-          orderId: baseResult.orderId,
-          orderCode: baseResult.orderCode,
-          payableAmount: baseResult.payableAmount,
-          paymentStatus: 'PENDING',
-          paymentUrl: `${zibalBase}/start/${encodeURIComponent(baseResult.authority)}`,
-        };
-      }
-      return {
-        orderId: baseResult.orderId,
-        orderCode: baseResult.orderCode,
-        payableAmount: baseResult.payableAmount,
-        paymentStatus: 'PENDING',
-        paymentUrl: `https://www.zarinpal.com/pg/StartPay/${baseResult.authority}`,
-      };
-    }
 
     const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:3005';
     const requestedLangRaw = (dto as any)?.lang?.trim?.();
