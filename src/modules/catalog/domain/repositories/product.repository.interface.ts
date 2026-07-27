@@ -6,7 +6,12 @@ import { PaginatedResult } from '../../../shared/interfaces/paginated-result.int
 
 export interface IProductRepository {
   create(
-    data: CreateProductDto & { slug: string; images: string[] },
+    data: CreateProductDto & {
+      slug: string;
+      images: string[];
+      code: number;
+      finalPrice: number;
+    },
   ): Promise<Product>;
   findAll(filter?: ProductFilterDto): Promise<PaginatedResult<Product>>;
   findById(id: string): Promise<Product | null>;

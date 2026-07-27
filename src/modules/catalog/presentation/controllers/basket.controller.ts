@@ -101,20 +101,27 @@ export class BasketController {
     const items = basket.items.map((item) => {
       const variant = item.productVariant;
       const product = variant.product;
+      // قیمت سطح محصول است؛ برای سازگاری با فرانتی که variant.price می‌خواند، آینه می‌کنیم.
+      const variantWithPrice = {
+        ...variant,
+        price: product.finalPrice,
+        discountPrice: product.discountPrice ?? null,
+        discountPercent: product.discountPercent ?? null,
+      };
       return {
         id: item.id,
         quantity: item.quantity,
         productVariantId: variant.id,
         product: {
           ...product,
-          variants: [variant],
+          variants: [variantWithPrice],
         },
       };
     });
 
     const total = basket.items.reduce((sum, item) => {
       const variant = item.productVariant;
-      const unit = variant.discountPrice ?? variant.price;
+      const unit = variant.product.discountPrice ?? variant.product.finalPrice;
       return sum + toNumber(unit) * item.quantity;
     }, 0);
 
@@ -274,7 +281,7 @@ export class BasketController {
 
     const subtotalCents = basket.items.reduce((sum, item) => {
       const variant = item.productVariant;
-      const unit = variant.discountPrice ?? variant.price;
+      const unit = variant.product.discountPrice ?? variant.product.finalPrice;
       return sum + toCents(unit) * item.quantity;
     }, 0);
 
@@ -546,7 +553,7 @@ export class BasketController {
 
       const subtotalCents = basket.items.reduce((sum, item) => {
         const variant = item.productVariant;
-        const unit = variant.discountPrice ?? variant.price;
+        const unit = variant.product.discountPrice ?? variant.product.finalPrice;
         return sum + toCents(unit) * item.quantity;
       }, 0);
 
@@ -718,8 +725,8 @@ export class BasketController {
             sku: variant.sku,
             title: variant.product.title,
             quantity: item.quantity,
-            unitPrice: variant.price,
-            unitDiscountPrice: variant.discountPrice ?? null,
+            unitPrice: variant.product.finalPrice,
+            unitDiscountPrice: variant.product.discountPrice ?? null,
             isDeleted: false,
             deletedAt: null,
           };

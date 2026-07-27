@@ -6,6 +6,10 @@ import {
   IsObject,
   IsUUID,
   IsBoolean,
+  IsInt,
+  IsNumber,
+  Min,
+  Max,
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -72,4 +76,26 @@ export class CreateProductDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   showInIntro?: boolean;
+
+  @ApiProperty({ description: 'بهای تمام‌شدهٔ خالص (ورودی ادمین، برای محاسبهٔ قیمت نهایی)' })
+  @IsNotEmpty()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  costPrice: number;
+
+  @ApiPropertyOptional({ description: 'تخفیف دستی روی قیمت نهایی (مبلغ)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  discountPrice?: number;
+
+  @ApiPropertyOptional({ description: 'تخفیف دستی روی قیمت نهایی (درصد)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  discountPercent?: number;
 }

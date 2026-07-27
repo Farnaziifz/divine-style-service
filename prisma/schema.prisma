@@ -138,6 +138,12 @@ model Category {
   parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children    Category[] @relation("CategoryHierarchy")
   products    Product[]
+
+  // کدگذاری محصولات این دسته‌بندی
+  codeStart        Int     // شروع بازهٔ کد این دسته‌بندی (مثلاً ۲۰۰) — ادمین تعیین می‌کند
+  nextCode         Int     // شمارندهٔ داخلی برای تخصیص خودکار کد به محصول بعدی
+  profitMultiplier Decimal @db.Decimal(6, 2) @default(1) // ضریب سود این دسته‌بندی برای فرمول قیمت‌گذاری
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   isDeleted   Boolean   @default(false)
@@ -310,6 +316,13 @@ model Product {
   category   Category @relation(fields: [categoryId], references: [id])
   collections Collection[]
 
+  // کدگذاری و قیمت‌گذاری (سطح محصول، نه واریانت)
+  code            Int      @unique // کد خودکار محصول (بر اساس بازهٔ کد دسته‌بندی)
+  costPrice       Decimal  @db.Decimal(12, 2) // بهای تمام‌شدهٔ خالص (ورودی ادمین)
+  finalPrice      Decimal  @db.Decimal(12, 2) // قیمت نهایی محاسبه‌شده از فرمول
+  discountPrice   Decimal? @db.Decimal(12, 2) // تخفیف دستی روی finalPrice (اختیاری)
+  discountPercent Int? // درصد تخفیف دستی (اختیاری)
+
   // Specifications (JSON with validation against SpecificationKey)
   // Format: { "material": "Cotton", "care": "Hand wash" }
   specifications Json?
@@ -349,10 +362,7 @@ model ProductVariant {
   color     String?
   colorCode String? // Hex code for color
 
-  // Pricing & Inventory
-  price         Decimal  @db.Decimal(10, 2)
-  discountPrice Decimal? @db.Decimal(10, 2)
-  discountPercent Int?
+  // Inventory (قیمت‌گذاری در سطح محصول است، نه واریانت — ر.ک. Product.finalPrice)
   stock         Int      @default(0)
 
   // Media specific to variant (e.g. Red shirt image)

@@ -4,7 +4,6 @@ import {
   IsString,
   IsNumber,
   Min,
-  Max,
   IsObject,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -30,28 +29,6 @@ export class CreateProductVariantDto {
   @IsOptional()
   @IsString()
   colorCode?: string;
-
-  @ApiProperty()
-  @IsNotEmpty()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  price: number;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  discountPrice?: number;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  discountPercent?: number;
 
   @ApiProperty()
   @IsNotEmpty()

@@ -21,6 +21,22 @@ export class UpdateCategoryHandler implements ICommandHandler<UpdateCategoryComm
     const slug = dto.title
       ? slugify(dto.title, { lower: true })
       : category.slug;
-    return this.repository.update(id, { ...dto, slug });
+
+    // اگر codeStart تغییر کرده، فقط وقتی اعمال کن که این دسته‌بندی هنوز محصولی نگرفته
+    // (وگرنه کدهای قبلاً تخصیص‌یافته با بازهٔ جدید ناسازگار می‌شوند)
+    let nextCode: number | undefined;
+    let codeStart = dto.codeStart;
+    if (dto.codeStart != null && dto.codeStart !== category.codeStart) {
+      const productCount = await this.repository.countProducts(id);
+      if (productCount === 0) {
+        nextCode = dto.codeStart;
+      } else {
+        codeStart = undefined;
+      }
+    } else {
+      codeStart = undefined;
+    }
+
+    return this.repository.update(id, { ...dto, codeStart, nextCode, slug });
   }
 }

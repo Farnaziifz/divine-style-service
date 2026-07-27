@@ -39,6 +39,9 @@ import { DeleteProductHandler } from './application/commands/handlers/delete-pro
 import { GetProductsHandler } from './application/queries/handlers/get-products.handler';
 import { GetProductHandler } from './application/queries/handlers/get-product.handler';
 
+// Services
+import { PricingService } from './application/services/pricing.service';
+
 // Handlers - Specification
 import { CreateSpecificationKeyHandler } from './application/commands/handlers/create-specification-key.handler';
 import { UpdateSpecificationKeyHandler } from './application/commands/handlers/update-specification-key.handler';
@@ -57,6 +60,7 @@ import { GetSpecificationKeysHandler } from './application/queries/handlers/get-
     BasketController,
   ],
   providers: [
+    PricingService,
     { provide: 'ICollectionRepository', useClass: PrismaCollectionRepository },
     { provide: 'ICategoryRepository', useClass: PrismaCategoryRepository },
     { provide: 'IProductRepository', useClass: PrismaProductRepository },

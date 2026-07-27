@@ -10,7 +10,11 @@ export interface ICategoryRepository {
   findById(id: string): Promise<Category | null>;
   update(
     id: string,
-    data: UpdateCategoryDto & { slug: string },
+    data: UpdateCategoryDto & { slug: string; nextCode?: number },
   ): Promise<Category>;
   remove(id: string): Promise<Category>;
+  /** تخصیص اتمیک کد بعدی محصول در این دسته‌بندی (nextCode را یکی افزایش می‌دهد و مقدار قبلی را برمی‌گرداند) */
+  allocateNextProductCode(categoryId: string): Promise<number>;
+  /** تعداد محصولات (غیرحذف‌شده) این دسته‌بندی — برای تصمیم دربارهٔ تغییرپذیری codeStart */
+  countProducts(categoryId: string): Promise<number>;
 }

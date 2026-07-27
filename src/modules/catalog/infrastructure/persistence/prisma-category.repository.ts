@@ -19,6 +19,9 @@ export class PrismaCategoryRepository implements ICategoryRepository {
         slug: data.slug,
         image: data.image,
         parentId: data.parentId,
+        codeStart: data.codeStart,
+        nextCode: data.codeStart,
+        profitMultiplier: data.profitMultiplier ?? 1,
       },
     });
   }
@@ -65,7 +68,7 @@ export class PrismaCategoryRepository implements ICategoryRepository {
 
   async update(
     id: string,
-    data: UpdateCategoryDto & { slug: string },
+    data: UpdateCategoryDto & { slug: string; nextCode?: number },
   ): Promise<Category> {
     return this.prisma.category.update({
       where: { id },
@@ -75,11 +78,29 @@ export class PrismaCategoryRepository implements ICategoryRepository {
         slug: data.slug,
         image: data.image,
         parentId: data.parentId,
+        codeStart: data.codeStart,
+        nextCode: data.nextCode,
+        profitMultiplier: data.profitMultiplier,
       },
     });
   }
 
   async remove(id: string): Promise<Category> {
     return this.prisma.category.delete({ where: { id } });
+  }
+
+  async allocateNextProductCode(categoryId: string): Promise<number> {
+    const updated = await this.prisma.category.update({
+      where: { id: categoryId },
+      data: { nextCode: { increment: 1 } },
+      select: { nextCode: true },
+    });
+    return updated.nextCode - 1;
+  }
+
+  async countProducts(categoryId: string): Promise<number> {
+    return this.prisma.product.count({
+      where: { categoryId, isDeleted: false },
+    });
   }
 }

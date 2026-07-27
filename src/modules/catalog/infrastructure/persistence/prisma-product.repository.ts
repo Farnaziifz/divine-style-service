@@ -34,11 +34,16 @@ export class PrismaProductRepository implements IProductRepository {
   }
 
   async create(
-    data: CreateProductDto & { slug: string; images: string[] },
+    data: CreateProductDto & {
+      slug: string;
+      images: string[];
+      code: number;
+      finalPrice: number;
+    },
   ): Promise<Product> {
     const { collectionIds, variants, slug, ...rest } = data;
     const uniqueSlug = await this.ensureUniqueSlug(slug);
-    return this.prisma.product.create({
+    const product = await this.prisma.product.create({
       data: {
         ...rest,
         slug: uniqueSlug,
@@ -52,27 +57,36 @@ export class PrismaProductRepository implements IProductRepository {
               create: variants.map((variant) => ({
                 // SKU یکتا در کل دیتابیس تا تداخل با محصولات دیگر نباشد
                 sku: `${uniqueSlug}-${randomUUID().slice(0, 8)}`,
-                discountPercent: variant.discountPercent ?? undefined,
                 size: variant.size,
                 color: variant.color,
                 colorCode: variant.colorCode,
-                price: variant.price,
-                discountPrice:
-                  typeof variant.discountPercent === 'number' &&
-                  variant.discountPercent > 0
-                    ? Math.round(
-                        ((variant.price * (100 - variant.discountPercent)) /
-                          100) *
-                          100,
-                      ) / 100
-                    : variant.discountPrice,
                 stock: variant.stock,
                 specifications: variant.specifications ?? undefined,
               })),
             }
           : undefined,
       },
+      include: { category: true, collections: true, variants: true },
     });
+    return this.attachVariantPricing(product);
+  }
+
+  /**
+   * قیمت در سطح محصول است؛ برای سازگاری با فرانت‌هایی که هنوز variant.price می‌خوانند
+   * (سایت مشتری)، همان مقدار محصول را روی هر واریانت هم آینه می‌کنیم.
+   */
+  private attachVariantPricing<T extends { finalPrice: any; discountPrice: any; discountPercent: any; variants?: any[] }>(
+    product: T,
+  ): T {
+    if (Array.isArray(product.variants)) {
+      product.variants = product.variants.map((v) => ({
+        ...v,
+        price: product.finalPrice,
+        discountPrice: product.discountPrice ?? null,
+        discountPercent: product.discountPercent ?? null,
+      }));
+    }
+    return product;
   }
 
   async findAll(filter?: ProductFilterDto): Promise<PaginatedResult<Product>> {
@@ -108,13 +122,9 @@ export class PrismaProductRepository implements IProductRepository {
     }
 
     if (filter?.minPrice || filter?.maxPrice) {
-      where.variants = {
-        some: {
-          price: {
-            gte: filter.minPrice,
-            lte: filter.maxPrice,
-          },
-        },
+      where.finalPrice = {
+        gte: filter.minPrice,
+        lte: filter.maxPrice,
       };
     }
 
@@ -122,6 +132,8 @@ export class PrismaProductRepository implements IProductRepository {
     if (filter?.sort) {
       if (filter.sort === 'newest') orderBy.createdAt = 'desc';
       if (filter.sort === 'sold') orderBy.soldCount = 'desc';
+      if (filter.sort === 'price_asc') orderBy.finalPrice = 'asc';
+      if (filter.sort === 'price_desc') orderBy.finalPrice = 'desc';
     } else {
       orderBy.createdAt = 'desc';
     }
@@ -142,7 +154,7 @@ export class PrismaProductRepository implements IProductRepository {
     ]);
 
     return {
-      data,
+      data: data.map((p) => this.attachVariantPricing(p)),
       meta: {
         total,
         page,
@@ -153,7 +165,7 @@ export class PrismaProductRepository implements IProductRepository {
   }
 
   async findById(id: string): Promise<Product | null> {
-    return this.prisma.product.findUnique({
+    const product = await this.prisma.product.findUnique({
       where: { id },
       include: {
         category: true,
@@ -161,10 +173,11 @@ export class PrismaProductRepository implements IProductRepository {
         variants: true,
       },
     });
+    return product ? this.attachVariantPricing(product) : null;
   }
 
   async findBySlug(slug: string): Promise<Product | null> {
-    return this.prisma.product.findUnique({
+    const product = await this.prisma.product.findUnique({
       where: { slug },
       include: {
         category: true,
@@ -172,6 +185,7 @@ export class PrismaProductRepository implements IProductRepository {
         variants: true,
       },
     });
+    return product ? this.attachVariantPricing(product) : null;
   }
 
   async update(id: string, data: any): Promise<Product> {
@@ -185,10 +199,12 @@ export class PrismaProductRepository implements IProductRepository {
     }
 
     if (!variants) {
-      return this.prisma.product.update({
+      const updated = await this.prisma.product.update({
         where: { id },
         data: updateData,
+        include: { category: true, collections: true, variants: true },
       });
+      return this.attachVariantPricing(updated);
     }
 
     const product = await this.prisma.product.findFirst({
@@ -210,19 +226,6 @@ export class PrismaProductRepository implements IProductRepository {
       size: v.size ?? undefined,
       color: v.color ?? undefined,
       colorCode: v.colorCode ?? undefined,
-      price: Number(v.price) || 0,
-      discountPercent:
-        typeof v.discountPercent === 'number'
-          ? v.discountPercent
-          : v.discountPercent != null
-            ? Number(v.discountPercent) || undefined
-            : undefined,
-      discountPrice:
-        typeof v.discountPrice === 'number'
-          ? v.discountPrice
-          : v.discountPrice != null
-            ? Number(v.discountPrice) || undefined
-            : undefined,
       stock: Number(v.stock) || 0,
       specifications: v.specifications ?? undefined,
     }));
@@ -245,12 +248,6 @@ export class PrismaProductRepository implements IProductRepository {
       });
 
       for (const v of incoming) {
-        const computedDiscountPrice =
-          typeof v.discountPercent === 'number' && v.discountPercent > 0
-            ? Math.round(((v.price * (100 - v.discountPercent)) / 100) * 100) /
-              100
-            : v.discountPrice;
-
         if (v.sku && existingSkuSet.has(v.sku)) {
           await tx.productVariant.update({
             where: { sku: v.sku },
@@ -258,9 +255,6 @@ export class PrismaProductRepository implements IProductRepository {
               size: v.size,
               color: v.color,
               colorCode: v.colorCode,
-              price: v.price,
-              discountPercent: v.discountPercent ?? undefined,
-              discountPrice: computedDiscountPrice,
               stock: v.stock,
               specifications: v.specifications ?? undefined,
               isDeleted: false,
@@ -275,9 +269,6 @@ export class PrismaProductRepository implements IProductRepository {
               size: v.size,
               color: v.color,
               colorCode: v.colorCode,
-              price: v.price,
-              discountPercent: v.discountPercent ?? undefined,
-              discountPrice: computedDiscountPrice,
               stock: v.stock,
               specifications: v.specifications ?? undefined,
             },
@@ -293,14 +284,17 @@ export class PrismaProductRepository implements IProductRepository {
       }
     });
 
-    return this.prisma.product.findFirst({
+    const updated = await this.prisma.product.findFirst({
       where: { id },
       include: {
         category: true,
         collections: true,
         variants: true,
       },
-    }) as unknown as Product;
+    });
+    return (
+      updated ? this.attachVariantPricing(updated) : updated
+    ) as unknown as Product;
   }
 
   async remove(id: string): Promise<Product> {
