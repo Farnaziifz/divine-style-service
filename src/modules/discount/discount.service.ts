@@ -277,7 +277,7 @@ export class DiscountService {
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.DiscountCodeWhereInput = {};
+    const where: Prisma.DiscountCodeWhereInput = { isDeleted: false };
 
     if (query.scope) {
       where.scope = query.scope;
@@ -334,7 +334,7 @@ export class DiscountService {
 
   async findOne(id: string) {
     const row = await this.prisma.discountCode.findFirst({
-      where: { id },
+      where: { id, isDeleted: false },
       include: {
         user: {
           select: {
@@ -545,7 +545,10 @@ export class DiscountService {
 
   async remove(id: string) {
     await this.findOne(id);
-    await this.prisma.discountCode.delete({ where: { id } });
+    await this.prisma.discountCode.update({
+      where: { id },
+      data: { isDeleted: true, deletedAt: new Date(), isActive: false },
+    });
     return { success: true };
   }
 }

@@ -149,13 +149,18 @@ export class BasketController {
 
     const variant = dto.productVariantId
       ? await this.prisma.productVariant.findFirst({
-          where: { id: dto.productVariantId, isDeleted: false },
+          where: {
+            id: dto.productVariantId,
+            isDeleted: false,
+            product: { isActive: true, isDeleted: false },
+          },
           select: { id: true, productId: true },
         })
       : await this.prisma.productVariant.findFirst({
           where: {
             productId: dto.productId,
             isDeleted: false,
+            product: { isActive: true, isDeleted: false },
             ...(dto.size != null ? { size: dto.size } : {}),
             ...(dto.color != null ? { color: dto.color } : {}),
           },
@@ -663,6 +668,9 @@ export class BasketController {
         subtotalCents - discountAmountCents + shippingCostCents;
 
       for (const item of basket.items) {
+        if (!item.productVariant.product.isActive) {
+          throw new BadRequestException('این محصول دیگر در دسترس نیست');
+        }
         const reserved = await tx.productVariant.updateMany({
           where: {
             id: item.productVariantId,

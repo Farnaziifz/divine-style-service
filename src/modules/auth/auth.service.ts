@@ -14,10 +14,43 @@ import * as dns from 'node:dns';
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  // شمارندهٔ تلاش‌های ناموفق تایید OTP به ازای شماره موبایل — جلوگیری از brute-force روی کد ۵ رقمی
+  private readonly otpAttempts = new Map<
+    string,
+    { count: number; firstAttemptAt: number }
+  >();
+  private readonly MAX_OTP_ATTEMPTS = 5;
+  private readonly OTP_ATTEMPT_WINDOW_MS = 2 * 60 * 1000;
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
   ) {}
+
+  private assertOtpAttemptsAllowed(mobile: string) {
+    const entry = this.otpAttempts.get(mobile);
+    if (!entry) return;
+    const withinWindow =
+      Date.now() - entry.firstAttemptAt < this.OTP_ATTEMPT_WINDOW_MS;
+    if (withinWindow && entry.count >= this.MAX_OTP_ATTEMPTS) {
+      throw new BadRequestException(
+        'تعداد تلاش‌های مجاز تمام شده. لطفا کد جدید درخواست کنید.',
+      );
+    }
+    if (!withinWindow) {
+      this.otpAttempts.delete(mobile);
+    }
+  }
+
+  private recordFailedOtpAttempt(mobile: string) {
+    const now = Date.now();
+    const entry = this.otpAttempts.get(mobile);
+    if (entry && now - entry.firstAttemptAt < this.OTP_ATTEMPT_WINDOW_MS) {
+      entry.count += 1;
+    } else {
+      this.otpAttempts.set(mobile, { count: 1, firstAttemptAt: now });
+    }
+  }
 
   private isOtpTraceEnabled() {
     return (process.env.OTP_TRACE || 'false').toLowerCase() === 'true';
@@ -362,6 +395,8 @@ export class AuthService {
         expiresAt,
       },
     });
+    // کد جدید یعنی فرصت تلاش جدید
+    this.otpAttempts.delete(mobile);
 
     const { debugReturnCode } = this.getSmsConfig();
     if (debugReturnCode) {
@@ -371,6 +406,8 @@ export class AuthService {
   }
 
   async verifyOtp(mobile: string, code: string) {
+    this.assertOtpAttemptsAllowed(mobile);
+
     // 1. Find OTP record
     const otpRecord = await this.prisma.otp.findFirst({
       where: {
@@ -383,8 +420,11 @@ export class AuthService {
     });
 
     if (!otpRecord) {
+      this.recordFailedOtpAttempt(mobile);
       throw new BadRequestException('کد تایید نامعتبر یا منقضی شده است');
     }
+
+    this.otpAttempts.delete(mobile);
 
     // 2. Find or Create User
     let user = await this.prisma.user.findUnique({

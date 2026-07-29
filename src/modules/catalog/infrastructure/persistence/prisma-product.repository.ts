@@ -89,12 +89,18 @@ export class PrismaProductRepository implements IProductRepository {
     return product;
   }
 
-  async findAll(filter?: ProductFilterDto): Promise<PaginatedResult<Product>> {
+  async findAll(
+    filter?: ProductFilterDto,
+    includeInactive = false,
+  ): Promise<PaginatedResult<Product>> {
     const page = Number(filter?.page) || 1;
     const limit = Number(filter?.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: any = { isDeleted: false };
+    if (!includeInactive) {
+      where.isActive = true;
+    }
 
     if (filter?.search) {
       where.OR = [
@@ -164,9 +170,13 @@ export class PrismaProductRepository implements IProductRepository {
     };
   }
 
-  async findById(id: string): Promise<Product | null> {
-    const product = await this.prisma.product.findUnique({
-      where: { id },
+  async findById(id: string, includeInactive = false): Promise<Product | null> {
+    const where: any = { id, isDeleted: false };
+    if (!includeInactive) {
+      where.isActive = true;
+    }
+    const product = await this.prisma.product.findFirst({
+      where,
       include: {
         category: true,
         collections: true,
@@ -176,9 +186,13 @@ export class PrismaProductRepository implements IProductRepository {
     return product ? this.attachVariantPricing(product) : null;
   }
 
-  async findBySlug(slug: string): Promise<Product | null> {
-    const product = await this.prisma.product.findUnique({
-      where: { slug },
+  async findBySlug(slug: string, includeInactive = false): Promise<Product | null> {
+    const where: any = { slug, isDeleted: false };
+    if (!includeInactive) {
+      where.isActive = true;
+    }
+    const product = await this.prisma.product.findFirst({
+      where,
       include: {
         category: true,
         collections: true,
@@ -298,6 +312,9 @@ export class PrismaProductRepository implements IProductRepository {
   }
 
   async remove(id: string): Promise<Product> {
-    return this.prisma.product.delete({ where: { id } });
+    return this.prisma.product.update({
+      where: { id },
+      data: { isDeleted: true, deletedAt: new Date(), isActive: false },
+    });
   }
 }

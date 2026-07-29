@@ -11,6 +11,6 @@ export class GetProductsHandler implements IQueryHandler<GetProductsQuery> {
   ) {}
 
   async execute(query: GetProductsQuery) {
-    return this.repository.findAll(query.filter);
+    return this.repository.findAll(query.filter, query.includeInactive);
   }
 }

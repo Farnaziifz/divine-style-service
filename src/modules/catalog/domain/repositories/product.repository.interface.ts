@@ -13,9 +13,12 @@ export interface IProductRepository {
       finalPrice: number;
     },
   ): Promise<Product>;
-  findAll(filter?: ProductFilterDto): Promise<PaginatedResult<Product>>;
-  findById(id: string): Promise<Product | null>;
-  findBySlug(slug: string): Promise<Product | null>;
+  findAll(
+    filter?: ProductFilterDto,
+    includeInactive?: boolean,
+  ): Promise<PaginatedResult<Product>>;
+  findById(id: string, includeInactive?: boolean): Promise<Product | null>;
+  findBySlug(slug: string, includeInactive?: boolean): Promise<Product | null>;
   update(id: string, data: any): Promise<Product>;
   remove(id: string): Promise<Product>;
 }

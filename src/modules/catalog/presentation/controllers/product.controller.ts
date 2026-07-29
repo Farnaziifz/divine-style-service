@@ -11,9 +11,11 @@ import {
   Req,
   ForbiddenException,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import { JwtService } from '@nestjs/jwt';
 import { CreateProductDto } from '../dtos/create-product.dto';
 import { UpdateProductDto } from '../dtos/update-product.dto';
 import { ProductFilterDto } from '../dtos/product-filter.dto';
@@ -23,6 +25,7 @@ import { DeleteProductCommand } from '../../application/commands/delete-product.
 import { GetProductsQuery } from '../../application/queries/get-products.query';
 import { GetProductQuery } from '../../application/queries/get-product.query';
 import { MinioService } from '../../../shared/minio/minio.service';
+import { PrismaService } from '../../../shared/prisma/prisma.service';
 
 @ApiTags('Products')
 @Controller('products')
@@ -31,6 +34,8 @@ export class ProductController {
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
     private readonly minioService: MinioService,
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private assertCanWrite(req: any) {
@@ -41,6 +46,25 @@ export class ProductController {
       req.user.permissions.includes('PRODUCTS_WRITE');
     if (!isAdmin && !isOperatorWithPermission) {
       throw new ForbiddenException();
+    }
+  }
+
+  // این روت‌ها public هستن (بدون گارد) تا فروشگاه بدون لاگین کار کنه؛
+  // ولی اگه توکن معتبر ادمین/اپراتور بود، محصولات غیرفعال هم دیده بشن (برای مدیریت)
+  private async isStaffRequest(req: Request): Promise<boolean> {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader?.startsWith('Bearer ')) return false;
+    const token = authHeader.slice(7);
+    try {
+      const payload = await this.jwtService.verifyAsync(token, {
+        secret: 'secretKey', // TODO: Use env variable
+      });
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+      });
+      return user?.role === 'ADMIN' || user?.role === 'OPERATOR';
+    } catch {
+      return false;
     }
   }
 
@@ -57,14 +81,16 @@ export class ProductController {
 
   @Get()
   @ApiOperation({ summary: 'Get all products' })
-  findAll(@Query() filter: ProductFilterDto) {
-    return this.queryBus.execute(new GetProductsQuery(filter));
+  async findAll(@Query() filter: ProductFilterDto, @Req() req: Request) {
+    const includeInactive = await this.isStaffRequest(req);
+    return this.queryBus.execute(new GetProductsQuery(filter, includeInactive));
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get product by id' })
-  findOne(@Param('id') id: string) {
-    return this.queryBus.execute(new GetProductQuery(id));
+  async findOne(@Param('id') id: string, @Req() req: Request) {
+    const includeInactive = await this.isStaffRequest(req);
+    return this.queryBus.execute(new GetProductQuery(id, includeInactive));
   }
 
   @Patch(':id')

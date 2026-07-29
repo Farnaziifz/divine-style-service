@@ -33,8 +33,11 @@ export class PrismaCollectionRepository implements ICollectionRepository {
     const skip = (page - 1) * limit;
     const search = pagination?.search?.trim();
     const where = search
-      ? { title: { contains: search, mode: 'insensitive' as const } }
-      : {};
+      ? {
+          isDeleted: false,
+          title: { contains: search, mode: 'insensitive' as const },
+        }
+      : { isDeleted: false };
 
     const [data, total] = await Promise.all([
       this.prisma.collection.findMany({
@@ -58,7 +61,7 @@ export class PrismaCollectionRepository implements ICollectionRepository {
   }
 
   async findById(id: string): Promise<Collection | null> {
-    return this.prisma.collection.findUnique({ where: { id } });
+    return this.prisma.collection.findFirst({ where: { id, isDeleted: false } });
   }
 
   async update(
@@ -78,6 +81,9 @@ export class PrismaCollectionRepository implements ICollectionRepository {
   }
 
   async remove(id: string): Promise<Collection> {
-    return this.prisma.collection.delete({ where: { id } });
+    return this.prisma.collection.update({
+      where: { id },
+      data: { isDeleted: true, deletedAt: new Date() },
+    });
   }
 }

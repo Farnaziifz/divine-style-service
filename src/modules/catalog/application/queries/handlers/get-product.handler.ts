@@ -11,8 +11,8 @@ export class GetProductHandler implements IQueryHandler<GetProductQuery> {
   ) {}
 
   async execute(query: GetProductQuery) {
-    const { id } = query;
-    const product = await this.repository.findById(id);
+    const { id, includeInactive } = query;
+    const product = await this.repository.findById(id, includeInactive);
     if (!product) {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }

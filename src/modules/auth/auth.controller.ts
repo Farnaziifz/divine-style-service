@@ -1,4 +1,5 @@
 import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import {
   ApiTags,
@@ -20,6 +21,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('otp')
+  @Throttle({ default: { limit: 3, ttl: 300_000 } })
   @ApiOperation({ summary: 'ارسال کد تایید به شماره موبایل' })
   @ApiResponse({ status: 201, description: 'کد تایید ارسال شد' })
   @ApiResponse({ status: 400, description: 'شماره موبایل نامعتبر است' })
@@ -28,6 +30,7 @@ export class AuthController {
   }
 
   @Post('verify')
+  @Throttle({ default: { limit: 5, ttl: 120_000 } })
   @ApiOperation({ summary: 'بررسی کد تایید و دریافت توکن' })
   @ApiResponse({ status: 201, description: 'توکن با موفقیت صادر شد' })
   @ApiResponse({
@@ -61,6 +64,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'ورود با شماره موبایل و رمز عبور' })
   @ApiResponse({ status: 200, description: 'ورود موفق و دریافت توکن' })
   @ApiResponse({

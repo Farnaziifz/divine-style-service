@@ -183,6 +183,12 @@ export class UserController {
     @Body() dto: UpdateUserAccessDto,
   ) {
     this.assertCanManageUsers(req);
+    if (id === req.user.id) {
+      throw new ForbiddenException('Cannot modify your own access');
+    }
+    if (dto.role !== undefined && req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Only ADMIN can change roles');
+    }
     return this.userService.updateAccess(id, dto);
   }
 }

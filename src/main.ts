@@ -24,7 +24,9 @@ async function bootstrap() {
     maxAge: 3600,
   });
 
-  app.useGlobalPipes(new ValidationPipe({ transform: true }));
+  app.useGlobalPipes(
+    new ValidationPipe({ transform: true, whitelist: true }),
+  );
 
   const config = new DocumentBuilder()
     .setTitle('Divine API')

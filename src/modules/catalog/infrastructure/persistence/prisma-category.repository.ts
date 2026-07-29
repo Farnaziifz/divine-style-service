@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ICategoryRepository } from '../../domain/repositories/category.repository.interface';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { Category } from '@prisma/client';
@@ -11,7 +11,26 @@ import { PaginatedResult } from '../../../shared/interfaces/paginated-result.int
 export class PrismaCategoryRepository implements ICategoryRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** جلوگیری از تداخل بازهٔ کد این دسته‌بندی با بازهٔ کد استفاده‌شدهٔ دسته‌بندی‌های دیگر */
+  private async assertNoCodeRangeOverlap(codeStart: number, excludeId?: string) {
+    const overlapping = await this.prisma.category.findFirst({
+      where: {
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+        isDeleted: false,
+        codeStart: { lte: codeStart },
+        nextCode: { gt: codeStart },
+      },
+      select: { id: true, title: true },
+    });
+    if (overlapping) {
+      throw new BadRequestException(
+        `بازهٔ کد وارد شده با دسته‌بندی «${overlapping.title}» تداخل دارد`,
+      );
+    }
+  }
+
   async create(data: CreateCategoryDto & { slug: string }): Promise<Category> {
+    await this.assertNoCodeRangeOverlap(data.codeStart);
     return this.prisma.category.create({
       data: {
         title: data.title,
@@ -34,8 +53,11 @@ export class PrismaCategoryRepository implements ICategoryRepository {
     const skip = (page - 1) * limit;
     const search = pagination?.search?.trim();
     const where = search
-      ? { title: { contains: search, mode: 'insensitive' as const } }
-      : {};
+      ? {
+          isDeleted: false,
+          title: { contains: search, mode: 'insensitive' as const },
+        }
+      : { isDeleted: false };
 
     const [data, total] = await Promise.all([
       this.prisma.category.findMany({
@@ -60,8 +82,8 @@ export class PrismaCategoryRepository implements ICategoryRepository {
   }
 
   async findById(id: string): Promise<Category | null> {
-    return this.prisma.category.findUnique({
-      where: { id },
+    return this.prisma.category.findFirst({
+      where: { id, isDeleted: false },
       include: { children: true },
     });
   }
@@ -70,6 +92,9 @@ export class PrismaCategoryRepository implements ICategoryRepository {
     id: string,
     data: UpdateCategoryDto & { slug: string; nextCode?: number },
   ): Promise<Category> {
+    if (data.codeStart != null) {
+      await this.assertNoCodeRangeOverlap(data.codeStart, id);
+    }
     return this.prisma.category.update({
       where: { id },
       data: {
@@ -86,7 +111,10 @@ export class PrismaCategoryRepository implements ICategoryRepository {
   }
 
   async remove(id: string): Promise<Category> {
-    return this.prisma.category.delete({ where: { id } });
+    return this.prisma.category.update({
+      where: { id },
+      data: { isDeleted: true, deletedAt: new Date() },
+    });
   }
 
   async allocateNextProductCode(categoryId: string): Promise<number> {
