@@ -4,10 +4,10 @@ services:
     environment:
       POSTGRES_DB: divine_db
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: 0LVDUToUxZMoKPNUk4tbD5VC
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,10 +21,10 @@ services:
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_ROOT_PASSWORD: Ime3T7KXUVk3z1LbovD0iFbF
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -42,12 +42,12 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3005
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/divine_db?schema=public
-      JWT_SECRET: dev-jwt-secret
-      JWT_REFRESH_SECRET: dev-refresh-secret
+      DATABASE_URL: postgresql://postgres:0LVDUToUxZMoKPNUk4tbD5VC@postgres:5432/divine_db?schema=public
+      JWT_SECRET: 073964fe58f4a2a72ff8413f63538211d50368a02dbc500a20f148743a6bf575
+      JWT_REFRESH_SECRET: 21fd45c64711631c51d54e16bca98fe0e29e76a79bab443f0ec382fbf989c3f1
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin123
+      MINIO_SECRET_KEY: Ime3T7KXUVk3z1LbovD0iFbF
       MINIO_BUCKET_NAME: divine-shop
       PRISMA_SYNC: dbpush
       OTP_TRACE: "true"
