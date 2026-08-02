@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { SharedModule } from './modules/shared/shared.module';
@@ -16,6 +17,7 @@ import { SiteSettingsModule } from './modules/site-settings/site-settings.module
 import { DirectModule } from './modules/direct/direct.module';
 import { BlogModule } from './modules/blog/blog.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { ContentCalendarModule } from './modules/content-calendar/content-calendar.module';
 
 @Module({
   imports: [
@@ -27,6 +29,7 @@ import { ReportsModule } from './modules/reports/reports.module';
         },
       ],
     }),
+    ScheduleModule.forRoot(),
     SharedModule,
     AuthModule,
     UserModule,
@@ -40,6 +43,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     DirectModule,
     BlogModule,
     ReportsModule,
+    ContentCalendarModule,
   ],
   controllers: [AppController],
   providers: [

@@ -4,6 +4,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { SharedModule } from '../shared/shared.module';
 import { DiscountModule } from '../discount/discount.module';
 import { PaymentModule } from '../payment/payment.module';
+import { OrderModule } from '../order/order.module';
+import { ContentCalendarModule } from '../content-calendar/content-calendar.module';
 
 // Controllers
 import { CollectionController } from './presentation/controllers/collection.controller';
@@ -55,6 +57,8 @@ import { GetSpecificationKeysHandler } from './application/queries/handlers/get-
     CqrsModule,
     DiscountModule,
     PaymentModule,
+    OrderModule,
+    ContentCalendarModule,
     JwtModule.register({}),
   ],
   // Registered controllers

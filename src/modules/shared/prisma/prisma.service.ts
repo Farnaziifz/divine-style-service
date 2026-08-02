@@ -20,6 +20,7 @@ export class PrismaService
         'ProductReview',
         'Order',
         'DiscountCode',
+        'ContentCalendarEntry',
       ];
 
       if (params.model && modelsWithSoftDelete.includes(params.model)) {

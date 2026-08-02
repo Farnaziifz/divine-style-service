@@ -15,10 +15,16 @@ import { AuthGuard } from '@nestjs/passport';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { DiscountService } from '../../../discount/discount.service';
 import { PaymentService } from '../../../payment/payment.service';
+import { OrderReservationService } from '../../../order/order-reservation.service';
+import { RESERVATION_TTL_MS } from '../../../order/reservation.constants';
 import { UpsertBasketItemDto } from '../dtos/upsert-basket-item.dto';
 import { UpdateBasketItemDto } from '../dtos/update-basket-item.dto';
 import { BasketCheckoutPreviewDto } from '../dtos/basket-checkout-preview.dto';
 import { BasketCheckoutDto } from '../dtos/basket-checkout.dto';
+
+function reservationDeadline(): Date {
+  return new Date(Date.now() + RESERVATION_TTL_MS);
+}
 
 function toNumber(value: any): number {
   if (typeof value === 'number') return value;
@@ -55,6 +61,7 @@ export class BasketController {
     private readonly prisma: PrismaService,
     private readonly discountService: DiscountService,
     private readonly paymentService: PaymentService,
+    private readonly orderReservation: OrderReservationService,
   ) {}
 
   private async getOrCreateActiveBasket(userId: string) {
@@ -172,23 +179,35 @@ export class BasketController {
       throw new BadRequestException('Variant not found for product');
     }
 
-    await this.prisma.tempBasketItem.upsert({
-      where: {
-        basketId_productVariantId: {
+    await this.prisma.$transaction(async (tx) => {
+      const reserved = await tx.productVariant.updateMany({
+        where: { id: variant.id, isDeleted: false, stock: { gte: quantity } },
+        data: { stock: { decrement: quantity } },
+      });
+      if (reserved.count === 0) {
+        throw new BadRequestException('موجودی کافی نیست');
+      }
+
+      await tx.tempBasketItem.upsert({
+        where: {
+          basketId_productVariantId: {
+            basketId: basket.id,
+            productVariantId: variant.id,
+          },
+        },
+        update: {
+          isDeleted: false,
+          deletedAt: null,
+          quantity: { increment: quantity },
+          reservedUntil: reservationDeadline(),
+        },
+        create: {
           basketId: basket.id,
           productVariantId: variant.id,
+          quantity,
+          reservedUntil: reservationDeadline(),
         },
-      },
-      update: {
-        isDeleted: false,
-        deletedAt: null,
-        quantity: { increment: quantity },
-      },
-      create: {
-        basketId: basket.id,
-        productVariantId: variant.id,
-        quantity,
-      },
+      });
     });
 
     return this.getBasketResponse(userId);
@@ -211,9 +230,37 @@ export class BasketController {
     });
     if (!basket) throw new BadRequestException('Basket not found');
 
-    await this.prisma.tempBasketItem.updateMany({
-      where: { id, basketId: basket.id, isDeleted: false },
-      data: { quantity: dto.quantity },
+    await this.prisma.$transaction(async (tx) => {
+      const item = await tx.tempBasketItem.findFirst({
+        where: { id, basketId: basket.id, isDeleted: false },
+        select: { productVariantId: true, quantity: true },
+      });
+      if (!item) throw new BadRequestException('Item not found');
+
+      const delta = dto.quantity - item.quantity;
+      if (delta > 0) {
+        const reserved = await tx.productVariant.updateMany({
+          where: {
+            id: item.productVariantId,
+            isDeleted: false,
+            stock: { gte: delta },
+          },
+          data: { stock: { decrement: delta } },
+        });
+        if (reserved.count === 0) {
+          throw new BadRequestException('موجودی کافی نیست');
+        }
+      } else if (delta < 0) {
+        await tx.productVariant.updateMany({
+          where: { id: item.productVariantId, isDeleted: false },
+          data: { stock: { increment: -delta } },
+        });
+      }
+
+      await tx.tempBasketItem.updateMany({
+        where: { id, basketId: basket.id, isDeleted: false },
+        data: { quantity: dto.quantity, reservedUntil: reservationDeadline() },
+      });
     });
 
     return this.getBasketResponse(userId);
@@ -232,9 +279,21 @@ export class BasketController {
     });
     if (!basket) return this.getBasketResponse(userId);
 
-    await this.prisma.tempBasketItem.updateMany({
-      where: { id, basketId: basket.id, isDeleted: false },
-      data: { isDeleted: true, deletedAt: new Date() },
+    await this.prisma.$transaction(async (tx) => {
+      const item = await tx.tempBasketItem.findFirst({
+        where: { id, basketId: basket.id, isDeleted: false },
+        select: { productVariantId: true, quantity: true },
+      });
+      if (!item) return;
+
+      await tx.tempBasketItem.updateMany({
+        where: { id, basketId: basket.id, isDeleted: false },
+        data: { isDeleted: true, deletedAt: new Date() },
+      });
+      await tx.productVariant.updateMany({
+        where: { id: item.productVariantId, isDeleted: false },
+        data: { stock: { increment: item.quantity } },
+      });
     });
 
     return this.getBasketResponse(userId);
@@ -458,15 +517,15 @@ export class BasketController {
       // Every checkout call creates its own order — no reusing a prior gateway
       // authority (they go stale fast and the gateway rejects old ones as
       // "expired"). Any earlier attempt by this user still sitting in
-      // PENDING_PAYMENT past this window is abandoned; fail it out and release
-      // its stock/discount before creating the new order below.
-      const STALE_WINDOW_MS = 15 * 60 * 1000;
+      // PENDING_PAYMENT past this window is abandoned; release it before
+      // creating the new order below (the background sweeper also does this
+      // globally, but we don't want to wait on it here).
       const stalePending = await tx.paymentTransaction.findMany({
         where: {
           isDeleted: false,
           provider: paymentProvider as any,
           status: 'INITIATED',
-          createdAt: { lt: new Date(Date.now() - STALE_WINDOW_MS) },
+          createdAt: { lt: new Date(Date.now() - RESERVATION_TTL_MS) },
           order: {
             isDeleted: false,
             userId,
@@ -474,55 +533,11 @@ export class BasketController {
             orderStatus: 'PENDING_PAYMENT',
           },
         },
-        include: {
-          order: { select: { id: true, discountCode: true } },
-        },
+        select: { orderId: true },
       });
 
       for (const stale of stalePending) {
-        if (!stale.order) continue;
-
-        await tx.paymentTransaction.updateMany({
-          where: { id: stale.id, status: 'INITIATED' },
-          data: { status: 'FAILED', verifiedAt: new Date() },
-        });
-        await tx.order.updateMany({
-          where: { id: stale.order.id, paymentStatus: 'PENDING' },
-          data: { paymentStatus: 'FAILED', orderStatus: 'CANCELED' },
-        });
-
-        if (stale.order.discountCode) {
-          await tx.discountCode.updateMany({
-            where: {
-              code: stale.order.discountCode,
-              usedCount: { gt: 0 },
-              isDeleted: false,
-            },
-            data: { usedCount: { decrement: 1 } },
-          });
-        }
-
-        const staleItems = await tx.orderItem.findMany({
-          where: { orderId: stale.order.id, isDeleted: false },
-          select: { productVariantId: true, quantity: true },
-        });
-        const staleQuantityByVariant = new Map<string, number>();
-        for (const item of staleItems) {
-          staleQuantityByVariant.set(
-            item.productVariantId,
-            (staleQuantityByVariant.get(item.productVariantId) ?? 0) +
-              item.quantity,
-          );
-        }
-        for (const [
-          productVariantId,
-          quantity,
-        ] of staleQuantityByVariant.entries()) {
-          await tx.productVariant.updateMany({
-            where: { id: productVariantId, isDeleted: false },
-            data: { stock: { increment: quantity } },
-          });
-        }
+        await this.orderReservation.releaseOrder(tx, stale.orderId);
       }
 
       const basket = await tx.tempBasket.findFirst({
@@ -667,21 +682,16 @@ export class BasketController {
       const payableCents =
         subtotalCents - discountAmountCents + shippingCostCents;
 
+      // Stock was already reserved when these items were added to the
+      // basket (see BasketController.upsertItem/updateItem) — nothing to
+      // decrement here. Just guard against the sweeper having released a
+      // reservation concurrently (should be rare; it only removes items
+      // whose 5-minute hold already expired).
       for (const item of basket.items) {
         if (!item.productVariant.product.isActive) {
           throw new BadRequestException('این محصول دیگر در دسترس نیست');
         }
-        const reserved = await tx.productVariant.updateMany({
-          where: {
-            id: item.productVariantId,
-            isDeleted: false,
-            stock: { gte: item.quantity },
-          },
-          data: {
-            stock: { decrement: item.quantity },
-          },
-        });
-        if (reserved.count === 0) {
+        if (!item.reservedUntil || item.reservedUntil <= now) {
           throw new BadRequestException('موجودی محصول کافی نیست');
         }
       }
@@ -805,57 +815,18 @@ export class BasketController {
       }
     } catch (e) {
       await this.prisma.$transaction(async (tx) => {
-        await tx.paymentTransaction.updateMany({
-          where: { id: baseResult.paymentTransactionId, status: 'INITIATED' },
-          data: {
-            status: 'FAILED',
-            verifiedAt: new Date(),
-          },
-        });
-        await tx.order.updateMany({
-          where: { id: baseResult.orderId, paymentStatus: 'PENDING' },
-          data: {
-            paymentStatus: 'FAILED',
-            orderStatus: 'CANCELED',
-          },
-        });
-
-        const order = await tx.order.findUnique({
-          where: { id: baseResult.orderId },
-          select: { discountCode: true },
-        });
-        if (order?.discountCode) {
-          await tx.discountCode.updateMany({
-            where: {
-              code: order.discountCode,
-              usedCount: { gt: 0 },
-              isDeleted: false,
-            },
-            data: { usedCount: { decrement: 1 } },
-          });
-        }
+        await this.orderReservation.releaseOrder(tx, baseResult.orderId);
 
         const orderItems = await tx.orderItem.findMany({
           where: { orderId: baseResult.orderId, isDeleted: false },
           select: { productVariantId: true, quantity: true },
         });
-
         const quantityByVariant = new Map<string, number>();
         for (const item of orderItems) {
           quantityByVariant.set(
             item.productVariantId,
             (quantityByVariant.get(item.productVariantId) ?? 0) + item.quantity,
           );
-        }
-
-        for (const [
-          productVariantId,
-          quantity,
-        ] of quantityByVariant.entries()) {
-          await tx.productVariant.updateMany({
-            where: { id: productVariantId, isDeleted: false },
-            data: { stock: { increment: quantity } },
-          });
         }
 
         const basketToRestore = await tx.tempBasket.findFirst({
@@ -878,11 +849,17 @@ export class BasketController {
                   productVariantId,
                 },
               },
-              update: { isDeleted: false, deletedAt: null, quantity },
+              update: {
+                isDeleted: false,
+                deletedAt: null,
+                quantity,
+                reservedUntil: reservationDeadline(),
+              },
               create: {
                 basketId: basketToRestore.id,
                 productVariantId,
                 quantity,
+                reservedUntil: reservationDeadline(),
               },
             });
           }

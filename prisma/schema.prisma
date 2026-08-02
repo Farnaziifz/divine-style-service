@@ -2,7 +2,7 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
 }
 
@@ -15,30 +15,30 @@ datasource db {
 // User & Auth Models
 // ----------------------
 model User {
-  id           String    @id @default(uuid()) @db.Uuid
-  mobile       String    @unique
-  name         String?
-  lastName     String?
-  nationalCode String?   @unique
-  password     String?   // Optional because initial login might be OTP only
-  job          String?
-  addresses    Json?     @db.JsonB
-  role         Role      @default(USER)
-  permissions  String[]  @default([])
-  hashedRefreshToken String? // For Refresh Token mechanism
-  reviews      ProductReview[]
-  orders       Order[]
-  orderComments OrderComment[]
-  tempBaskets  TempBasket[]
-  shoppingList ShoppingListItem[]
-  discountCodes              DiscountCode[]
-  discountCodeEligibilities  DiscountCodeEligibleUser[]
-  directConversation DirectConversation?
-  directMessages     DirectMessage[] @relation("DirectMessageAuthor")
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  isDeleted    Boolean   @default(false)
-  deletedAt    DateTime?
+  id                        String                     @id @default(uuid()) @db.Uuid
+  mobile                    String                     @unique
+  name                      String?
+  lastName                  String?
+  nationalCode              String?                    @unique
+  password                  String? // Optional because initial login might be OTP only
+  job                       String?
+  addresses                 Json?                      @db.JsonB
+  role                      Role                       @default(USER)
+  permissions               String[]                   @default([])
+  hashedRefreshToken        String? // For Refresh Token mechanism
+  reviews                   ProductReview[]
+  orders                    Order[]
+  orderComments             OrderComment[]
+  tempBaskets               TempBasket[]
+  shoppingList              ShoppingListItem[]
+  discountCodes             DiscountCode[]
+  discountCodeEligibilities DiscountCodeEligibleUser[]
+  directConversation        DirectConversation?
+  directMessages            DirectMessage[]            @relation("DirectMessageAuthor")
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  isDeleted                 Boolean                    @default(false)
+  deletedAt                 DateTime?
 }
 
 model Otp {
@@ -60,37 +60,37 @@ enum Role {
 // ----------------------
 
 enum DiscountCodeScope {
-  ALL_USERS        // همه کاربران
-  SINGLE_USER      // یک کاربر مشخص (userId)
-  MULTIPLE_USERS   // چند کاربر مشخص (جدول واسط)
-  USER_GROUP       // دسته کاربران (userGroupId — منطق بیزینس بعداً)
+  ALL_USERS // همه کاربران
+  SINGLE_USER // یک کاربر مشخص (userId)
+  MULTIPLE_USERS // چند کاربر مشخص (جدول واسط)
+  USER_GROUP // دسته کاربران (userGroupId — منطق بیزینس بعداً)
 }
 
 enum DiscountValueType {
-  PERCENT       // درصد تخفیف روی سبد
-  FIXED_AMOUNT  // مبلغ ثابت تخفیف (تومان)
+  PERCENT // درصد تخفیف روی سبد
+  FIXED_AMOUNT // مبلغ ثابت تخفیف (تومان)
 }
 
 model DiscountCode {
-  id     String @id @default(uuid()) @db.Uuid
+  id    String  @id @default(uuid()) @db.Uuid
   /// کد یکتا (معمولاً uppercase)
-  code   String @unique
-  title  String?
+  code  String  @unique
+  title String?
 
   scope       DiscountCodeScope
   /// وقتی scope = SINGLE_USER
-  userId      String? @db.Uuid
-  user        User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId      String?           @db.Uuid
+  user        User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
   /// وقتی scope = USER_GROUP (جدول گروه بعداً اضافه می‌شود)
-  userGroupId String? @db.Uuid
+  userGroupId String?           @db.Uuid
 
   /// وقتی scope = MULTIPLE_USERS
   eligibleUsers DiscountCodeEligibleUser[]
 
   valueType      DiscountValueType
   /// درصد (۱–۱۰۰) یا مبلغ ثابت بسته به valueType
-  value          Decimal @db.Decimal(12, 2)
-  minOrderAmount Decimal? @db.Decimal(12, 2)
+  value          Decimal           @db.Decimal(12, 2)
+  minOrderAmount Decimal?          @db.Decimal(12, 2)
 
   validFrom DateTime
   validTo   DateTime
@@ -99,10 +99,10 @@ model DiscountCode {
   maxTotalUses Int?
   usedCount    Int  @default(0)
 
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  isDeleted Boolean  @default(false)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  isDeleted Boolean   @default(false)
   deletedAt DateTime?
 
   @@index([code])
@@ -129,25 +129,25 @@ model DiscountCodeEligibleUser {
 // ----------------------
 
 model Category {
-  id          String    @id @default(uuid()) @db.Uuid
+  id          String     @id @default(uuid()) @db.Uuid
   title       String
-  slug        String    @unique
+  slug        String     @unique
   description String?
   image       String? // URL from MinIO
-  parentId    String?   @db.Uuid
-  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  parentId    String?    @db.Uuid
+  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children    Category[] @relation("CategoryHierarchy")
   products    Product[]
 
   // کدگذاری محصولات این دسته‌بندی
-  codeStart        Int     // شروع بازهٔ کد این دسته‌بندی (مثلاً ۲۰۰) — ادمین تعیین می‌کند
-  nextCode         Int     // شمارندهٔ داخلی برای تخصیص خودکار کد به محصول بعدی
-  profitMultiplier Decimal @db.Decimal(6, 2) @default(1) // ضریب سود این دسته‌بندی برای فرمول قیمت‌گذاری
+  codeStart        Int // شروع بازهٔ کد این دسته‌بندی (مثلاً ۲۰۰) — ادمین تعیین می‌کند
+  nextCode         Int // شمارندهٔ داخلی برای تخصیص خودکار کد به محصول بعدی
+  profitMultiplier Decimal @default(1) @db.Decimal(6, 2) // ضریب سود این دسته‌بندی برای فرمول قیمت‌گذاری
 
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  isDeleted   Boolean   @default(false)
-  deletedAt   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
 }
 
 model Collection {
@@ -166,38 +166,38 @@ model Collection {
 
 // سایزهای قابل انتخاب در واریانت محصول (مدیریت از پنل ادمین)
 model Size {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String   @unique // مثلاً 42, XL, M
-  order     Int      @default(0) // ترتیب نمایش
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  isDeleted Boolean  @default(false)
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String    @unique // مثلاً 42, XL, M
+  order     Int       @default(0) // ترتیب نمایش
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  isDeleted Boolean   @default(false)
   deletedAt DateTime?
 }
 
 model ShippingMethod {
-  id          String   @id @default(uuid()) @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
   title       String
   description String?
   price       Int?
-  isActive    Boolean  @default(true)
+  isActive    Boolean   @default(true)
   orders      Order[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  isDeleted   Boolean  @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  isDeleted   Boolean   @default(false)
   deletedAt   DateTime?
 }
 
 model DirectConversation {
-  id              String   @id @default(uuid()) @db.Uuid
-  userId          String   @unique @db.Uuid
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String          @id @default(uuid()) @db.Uuid
+  userId          String          @unique @db.Uuid
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   userLastReadAt  DateTime?
   adminLastReadAt DateTime?
   messages        DirectMessage[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  isDeleted       Boolean  @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  isDeleted       Boolean         @default(false)
   deletedAt       DateTime?
 }
 
@@ -207,17 +207,17 @@ enum DirectAttachmentType {
 }
 
 model DirectMessage {
-  id             String               @id @default(uuid()) @db.Uuid
-  conversationId String               @db.Uuid
-  conversation   DirectConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id             String                @id @default(uuid()) @db.Uuid
+  conversationId String                @db.Uuid
+  conversation   DirectConversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   authorRole     Role
-  authorUserId   String?              @db.Uuid
-  authorUser     User?                @relation("DirectMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  authorUserId   String?               @db.Uuid
+  authorUser     User?                 @relation("DirectMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
   text           String?
   attachmentType DirectAttachmentType?
   attachmentUrl  String?
-  createdAt      DateTime @default(now())
-  isDeleted      Boolean  @default(false)
+  createdAt      DateTime              @default(now())
+  isDeleted      Boolean               @default(false)
   deletedAt      DateTime?
 
   @@index([conversationId, createdAt])
@@ -243,34 +243,34 @@ model BlogCategory {
 }
 
 model BlogPost {
-  id            String         @id @default(uuid()) @db.Uuid
-  categoryId    String         @db.Uuid
-  category      BlogCategory   @relation(fields: [categoryId], references: [id])
-  status        BlogPostStatus @default(DRAFT)
-  publishedAt   DateTime?
+  id          String         @id @default(uuid()) @db.Uuid
+  categoryId  String         @db.Uuid
+  category    BlogCategory   @relation(fields: [categoryId], references: [id])
+  status      BlogPostStatus @default(DRAFT)
+  publishedAt DateTime?
 
-  title         String
-  slug          String         @unique
-  excerpt       String?
-  content       String
+  title   String
+  slug    String  @unique
+  excerpt String?
+  content String
 
   coverImageUrl String?
   coverImageAlt String?
 
-  seoTitle         String?
-  seoDescription   String?
-  seoKeywords      String[]
-  canonicalUrl     String?
-  ogTitle          String?
-  ogDescription    String?
-  ogImageUrl       String?
-  robotsNoIndex    Boolean        @default(false)
-  robotsNoFollow   Boolean        @default(false)
+  seoTitle       String?
+  seoDescription String?
+  seoKeywords    String[]
+  canonicalUrl   String?
+  ogTitle        String?
+  ogDescription  String?
+  ogImageUrl     String?
+  robotsNoIndex  Boolean  @default(false)
+  robotsNoFollow Boolean  @default(false)
 
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  isDeleted     Boolean        @default(false)
-  deletedAt     DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
 
   @@index([categoryId])
   @@index([status, publishedAt])
@@ -279,14 +279,14 @@ model BlogPost {
 
 // Dynamic Specifications (e.g., Fabric, Care, Origin)
 model SpecificationKey {
-  id        String   @id @default(uuid()) @db.Uuid
-  key       String   @unique // e.g. "material", "care_instruction"
+  id        String    @id @default(uuid()) @db.Uuid
+  key       String    @unique // e.g. "material", "care_instruction"
   label     String // e.g. "جنس پارچه", "نحوه شستشو"
-  type      SpecType @default(TEXT)
+  type      SpecType  @default(TEXT)
   options   String[] // For SELECT type
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  isDeleted Boolean  @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  isDeleted Boolean   @default(false)
   deletedAt DateTime?
 }
 
@@ -298,11 +298,11 @@ enum SpecType {
 }
 
 model Product {
-  id              String   @id @default(uuid()) @db.Uuid
-  title           String
-  slug            String   @unique
-  description     String
-  
+  id          String @id @default(uuid()) @db.Uuid
+  title       String
+  slug        String @unique
+  description String
+
   // SEO
   metaTitle       String?
   metaDescription String?
@@ -312,8 +312,8 @@ model Product {
   video  String? // URL
 
   // Relations
-  categoryId String   @db.Uuid
-  category   Category @relation(fields: [categoryId], references: [id])
+  categoryId  String       @db.Uuid
+  category    Category     @relation(fields: [categoryId], references: [id])
   collections Collection[]
 
   // کدگذاری و قیمت‌گذاری (سطح محصول، نه واریانت)
@@ -337,17 +337,42 @@ model Product {
   variants ProductVariant[]
 
   // Social
-  reviews ProductReview[]
-  shoppingListItems ShoppingListItem[]
-  orderItems OrderItem[]
+  reviews                ProductReview[]
+  shoppingListItems      ShoppingListItem[]
+  orderItems             OrderItem[]
+  contentCalendarEntries ContentCalendarEntry[]
+  contentPostedAt        DateTime? // اولین باری که این محصول توی شبکه‌های اجتماعی پست شد
 
-  isActive    Boolean  @default(true)
-  isFeatured  Boolean  @default(false) // محصول منتخب
-  showInIntro Boolean  @default(false) // نمایش در اینترو
-  createdAt  DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  isDeleted Boolean  @default(false)
+  isActive    Boolean   @default(true)
+  isFeatured  Boolean   @default(false) // محصول منتخب
+  showInIntro Boolean   @default(false) // نمایش در اینترو
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
+}
+
+enum ContentEntryType {
+  POST
+  STORY
+}
+
+model ContentCalendarEntry {
+  id       String           @id @default(uuid()) @db.Uuid
+  date     DateTime         @db.Date
+  type     ContentEntryType
+  title    String? // عنوان محتوا؛ برای آیتم خودکار (محصول‌محور) خالی می‌مونه
+  products Product[] // می‌تونه خالی باشه
+
+  isDone Boolean   @default(false)
+  doneAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  isDeleted Boolean   @default(false)
   deletedAt DateTime?
+
+  @@index([date])
 }
 
 model ProductVariant {
@@ -363,7 +388,7 @@ model ProductVariant {
   colorCode String? // Hex code for color
 
   // Inventory (قیمت‌گذاری در سطح محصول است، نه واریانت — ر.ک. Product.finalPrice)
-  stock         Int      @default(0)
+  stock Int @default(0)
 
   // Media specific to variant (e.g. Red shirt image)
   images String[]
@@ -374,9 +399,9 @@ model ProductVariant {
   tempBasketItems TempBasketItem[]
   orderItems      OrderItem[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  isDeleted Boolean  @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  isDeleted Boolean   @default(false)
   deletedAt DateTime?
 }
 
@@ -392,20 +417,20 @@ model ProductReview {
 
   isApproved Boolean @default(false) // Admin approval
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  isDeleted Boolean  @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  isDeleted Boolean   @default(false)
   deletedAt DateTime?
 }
 
 model TempBasket {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @db.Uuid
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   items     TempBasketItem[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  isDeleted Boolean  @default(false)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  isDeleted Boolean          @default(false)
   deletedAt DateTime?
 
   @@index([userId])
@@ -413,16 +438,17 @@ model TempBasket {
 }
 
 model TempBasketItem {
-  id              String        @id @default(uuid()) @db.Uuid
-  basketId        String        @db.Uuid
-  basket          TempBasket    @relation(fields: [basketId], references: [id], onDelete: Cascade)
-  productVariantId String       @db.Uuid
-  productVariant  ProductVariant @relation(fields: [productVariantId], references: [id])
-  quantity        Int
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  isDeleted       Boolean       @default(false)
-  deletedAt       DateTime?
+  id               String         @id @default(uuid()) @db.Uuid
+  basketId         String         @db.Uuid
+  basket           TempBasket     @relation(fields: [basketId], references: [id], onDelete: Cascade)
+  productVariantId String         @db.Uuid
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id])
+  quantity         Int
+  reservedUntil    DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  isDeleted        Boolean        @default(false)
+  deletedAt        DateTime?
 
   @@unique([basketId, productVariantId])
   @@index([basketId])
@@ -444,15 +470,15 @@ model ShoppingListItem {
 
 // نظرات کلی برند (تستیمونیال صفحه اصلی) — بدون وابستگی به محصول
 model SiteTestimonial {
-  id         String   @id @default(uuid()) @db.Uuid
-  authorName String   // نام نمایشی نویسنده نظر
-  comment    String   // متن نظر
-  rating     Int?     // 1-5 اختیاری
-  isApproved Boolean  @default(false)
-  order      Int      @default(0) // ترتیب نمایش (عدد کمتر = اول)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  isDeleted  Boolean  @default(false)
+  id         String    @id @default(uuid()) @db.Uuid
+  authorName String // نام نمایشی نویسنده نظر
+  comment    String // متن نظر
+  rating     Int? // 1-5 اختیاری
+  isApproved Boolean   @default(false)
+  order      Int       @default(0) // ترتیب نمایش (عدد کمتر = اول)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  isDeleted  Boolean   @default(false)
   deletedAt  DateTime?
 }
 
@@ -491,30 +517,30 @@ enum OrderStatus {
 }
 
 model Order {
-  id        String   @id @default(uuid()) @db.Uuid
-  orderCode String   @unique
-  userId    String   @db.Uuid
-  user      User     @relation(fields: [userId], references: [id])
-  items     OrderItem[]
-  comments  OrderComment[]
-  totalAmount Decimal @db.Decimal(10, 2) @default(0)
-  discountCode String?
-  discountAmount Decimal @db.Decimal(10, 2) @default(0)
-  shippingCost Decimal @db.Decimal(10, 2) @default(0)
-  shippingMethodId String? @db.Uuid
-  shippingMethod   ShippingMethod? @relation(fields: [shippingMethodId], references: [id], onDelete: SetNull)
+  id                  String               @id @default(uuid()) @db.Uuid
+  orderCode           String               @unique
+  userId              String               @db.Uuid
+  user                User                 @relation(fields: [userId], references: [id])
+  items               OrderItem[]
+  comments            OrderComment[]
+  totalAmount         Decimal              @default(0) @db.Decimal(10, 2)
+  discountCode        String?
+  discountAmount      Decimal              @default(0) @db.Decimal(10, 2)
+  shippingCost        Decimal              @default(0) @db.Decimal(10, 2)
+  shippingMethodId    String?              @db.Uuid
+  shippingMethod      ShippingMethod?      @relation(fields: [shippingMethodId], references: [id], onDelete: SetNull)
   shippingMethodTitle String?
   shippingMethodPrice Int?
-  payableAmount Decimal @db.Decimal(10, 2) @default(0)
-  shippingAddress Json? @db.JsonB
-  paymentStatus PaymentStatus @default(PENDING)
-  orderStatus OrderStatus @default(PENDING_PAYMENT)
-  paidAt DateTime?
-  payments PaymentTransaction[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  isDeleted Boolean  @default(false)
-  deletedAt DateTime?
+  payableAmount       Decimal              @default(0) @db.Decimal(10, 2)
+  shippingAddress     Json?                @db.JsonB
+  paymentStatus       PaymentStatus        @default(PENDING)
+  orderStatus         OrderStatus          @default(PENDING_PAYMENT)
+  paidAt              DateTime?
+  payments            PaymentTransaction[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  isDeleted           Boolean              @default(false)
+  deletedAt           DateTime?
 
   @@index([shippingMethodId])
   @@index([paidAt])
@@ -524,19 +550,19 @@ model Order {
 }
 
 model OrderComment {
-  id           String        @id @default(uuid()) @db.Uuid
-  orderId      String        @db.Uuid
-  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id           String         @id @default(uuid()) @db.Uuid
+  orderId      String         @db.Uuid
+  order        Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
   authorRole   Role
-  authorUserId String?       @db.Uuid
-  authorUser   User?         @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
-  parentId     String?       @db.Uuid
-  parent       OrderComment? @relation("OrderCommentToParent", fields: [parentId], references: [id], onDelete: Cascade)
+  authorUserId String?        @db.Uuid
+  authorUser   User?          @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+  parentId     String?        @db.Uuid
+  parent       OrderComment?  @relation("OrderCommentToParent", fields: [parentId], references: [id], onDelete: Cascade)
   replies      OrderComment[] @relation("OrderCommentToParent")
   message      String
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  isDeleted    Boolean       @default(false)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  isDeleted    Boolean        @default(false)
   deletedAt    DateTime?
 
   @@index([orderId])
@@ -545,18 +571,18 @@ model OrderComment {
 }
 
 model PaymentTransaction {
-  id        String   @id @default(uuid()) @db.Uuid
-  orderId   String   @db.Uuid
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  provider  PaymentProvider
-  status    PaymentTransactionStatus @default(INITIATED)
-  amount    Decimal  @db.Decimal(10, 2)
-  authority String?  @unique
-  refId     String?
-  createdAt DateTime @default(now())
+  id         String                   @id @default(uuid()) @db.Uuid
+  orderId    String                   @db.Uuid
+  order      Order                    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider   PaymentProvider
+  status     PaymentTransactionStatus @default(INITIATED)
+  amount     Decimal                  @db.Decimal(10, 2)
+  authority  String?                  @unique
+  refId      String?
+  createdAt  DateTime                 @default(now())
   verifiedAt DateTime?
-  isDeleted Boolean  @default(false)
-  deletedAt DateTime?
+  isDeleted  Boolean                  @default(false)
+  deletedAt  DateTime?
 
   @@index([orderId])
   @@index([provider])
@@ -564,22 +590,22 @@ model PaymentTransaction {
 }
 
 model OrderItem {
-  id               String        @id @default(uuid()) @db.Uuid
-  orderId          String        @db.Uuid
-  order            Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId        String        @db.Uuid
-  product          Product       @relation(fields: [productId], references: [id])
-  productVariantId String        @db.Uuid
-  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id])
-  sku              String
-  title            String
-  quantity         Int
-  unitPrice        Decimal       @db.Decimal(10, 2)
-  unitDiscountPrice Decimal?     @db.Decimal(10, 2)
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  isDeleted        Boolean       @default(false)
-  deletedAt        DateTime?
+  id                String         @id @default(uuid()) @db.Uuid
+  orderId           String         @db.Uuid
+  order             Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId         String         @db.Uuid
+  product           Product        @relation(fields: [productId], references: [id])
+  productVariantId  String         @db.Uuid
+  productVariant    ProductVariant @relation(fields: [productVariantId], references: [id])
+  sku               String
+  title             String
+  quantity          Int
+  unitPrice         Decimal        @db.Decimal(10, 2)
+  unitDiscountPrice Decimal?       @db.Decimal(10, 2)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  isDeleted         Boolean        @default(false)
+  deletedAt         DateTime?
 
   @@index([orderId])
   @@index([productId])

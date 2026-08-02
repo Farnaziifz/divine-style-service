@@ -2,9 +2,12 @@ import { Controller, Get, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { PaginationDto } from '../shared/dtos/pagination.dto';
 import { PaymentService } from './payment.service';
+import { OrderReservationService } from '../order/order-reservation.service';
+import { RESERVATION_TTL_MS } from '../order/reservation.constants';
 
 @ApiTags('Payment')
 @Controller('payments')
@@ -14,7 +17,32 @@ export class PaymentController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentService: PaymentService,
+    private readonly orderReservation: OrderReservationService,
   ) {}
+
+  /**
+   * After releaseOrder() frees the stock, put the order's items back into
+   * the user's basket (soft-un-delete + upsert) with a fresh reservation
+   * window, since the stock is available to them again for a bit.
+   */
+  private async restoreOrderToBasket(
+    tx: Prisma.TransactionClient,
+    orderId: string,
+    userId: string,
+  ) {
+    const orderItems = await tx.orderItem.findMany({
+      where: { orderId, isDeleted: false },
+      select: { productVariantId: true, quantity: true },
+    });
+    const quantityByVariant = new Map<string, number>();
+    for (const item of orderItems) {
+      quantityByVariant.set(
+        item.productVariantId,
+        (quantityByVariant.get(item.productVariantId) ?? 0) + item.quantity,
+      );
+    }
+    await this.restoreBasketItems(tx, userId, quantityByVariant);
+  }
 
   private parseActiveProviders(
     raw: string | null | undefined,
@@ -89,7 +117,7 @@ export class PaymentController {
   }
 
   private async restoreBasketItems(
-    tx: any,
+    tx: Prisma.TransactionClient,
     userId: string,
     quantityByVariant: Map<string, number>,
   ) {
@@ -104,13 +132,19 @@ export class PaymentController {
       data: { isDeleted: false, deletedAt: null },
     });
 
+    const reservedUntil = new Date(Date.now() + RESERVATION_TTL_MS);
     for (const [productVariantId, quantity] of quantityByVariant.entries()) {
       await tx.tempBasketItem.upsert({
         where: {
           basketId_productVariantId: { basketId: basket.id, productVariantId },
         },
-        update: { isDeleted: false, deletedAt: null, quantity },
-        create: { basketId: basket.id, productVariantId, quantity },
+        update: { isDeleted: false, deletedAt: null, quantity, reservedUntil },
+        create: {
+          basketId: basket.id,
+          productVariantId,
+          quantity,
+          reservedUntil,
+        },
       });
     }
   }
@@ -250,59 +284,9 @@ export class PaymentController {
       }
 
       if (status !== 'OK') {
-        const paymentUpdated = await tx.paymentTransaction.updateMany({
-          where: { id: current.id, status: 'INITIATED' },
-          data: {
-            status: 'FAILED',
-            verifiedAt: new Date(),
-          },
-        });
-        await tx.order.updateMany({
-          where: { id: orderId, paymentStatus: 'PENDING' },
-          data: { paymentStatus: 'FAILED', orderStatus: 'CANCELED' },
-        });
-
-        if (paymentUpdated.count > 0) {
-          if (current.order?.discountCode) {
-            await tx.discountCode.updateMany({
-              where: {
-                code: current.order.discountCode,
-                usedCount: { gt: 0 },
-                isDeleted: false,
-              },
-              data: { usedCount: { decrement: 1 } },
-            });
-          }
-
-          const orderItems = await tx.orderItem.findMany({
-            where: { orderId, isDeleted: false },
-            select: { productVariantId: true, quantity: true },
-          });
-
-          const quantityByVariant = new Map<string, number>();
-          for (const item of orderItems) {
-            quantityByVariant.set(
-              item.productVariantId,
-              (quantityByVariant.get(item.productVariantId) ?? 0) +
-                item.quantity,
-            );
-          }
-
-          for (const [
-            productVariantId,
-            quantity,
-          ] of quantityByVariant.entries()) {
-            await tx.productVariant.updateMany({
-              where: { id: productVariantId, isDeleted: false },
-              data: { stock: { increment: quantity } },
-            });
-          }
-
-          await this.restoreBasketItems(
-            tx,
-            current.order!.userId,
-            quantityByVariant,
-          );
+        const released = await this.orderReservation.releaseOrder(tx, orderId);
+        if (released) {
+          await this.restoreOrderToBasket(tx, orderId, current.order!.userId);
         }
         return {
           redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
@@ -317,59 +301,9 @@ export class PaymentController {
           amountToman,
         });
       } catch (e) {
-        const paymentUpdated = await tx.paymentTransaction.updateMany({
-          where: { id: current.id, status: 'INITIATED' },
-          data: {
-            status: 'FAILED',
-            verifiedAt: new Date(),
-          },
-        });
-        await tx.order.updateMany({
-          where: { id: orderId, paymentStatus: 'PENDING' },
-          data: { paymentStatus: 'FAILED', orderStatus: 'CANCELED' },
-        });
-
-        if (paymentUpdated.count > 0) {
-          if (current.order?.discountCode) {
-            await tx.discountCode.updateMany({
-              where: {
-                code: current.order.discountCode,
-                usedCount: { gt: 0 },
-                isDeleted: false,
-              },
-              data: { usedCount: { decrement: 1 } },
-            });
-          }
-
-          const orderItems = await tx.orderItem.findMany({
-            where: { orderId, isDeleted: false },
-            select: { productVariantId: true, quantity: true },
-          });
-
-          const quantityByVariant = new Map<string, number>();
-          for (const item of orderItems) {
-            quantityByVariant.set(
-              item.productVariantId,
-              (quantityByVariant.get(item.productVariantId) ?? 0) +
-                item.quantity,
-            );
-          }
-
-          for (const [
-            productVariantId,
-            quantity,
-          ] of quantityByVariant.entries()) {
-            await tx.productVariant.updateMany({
-              where: { id: productVariantId, isDeleted: false },
-              data: { stock: { increment: quantity } },
-            });
-          }
-
-          await this.restoreBasketItems(
-            tx,
-            current.order!.userId,
-            quantityByVariant,
-          );
+        const released = await this.orderReservation.releaseOrder(tx, orderId);
+        if (released) {
+          await this.restoreOrderToBasket(tx, orderId, current.order!.userId);
         }
 
         return {
@@ -443,58 +377,15 @@ export class PaymentController {
 
       const callbackSuccess = String(success) === '1' && String(status) === '2';
       if (!callbackSuccess) {
-        const paymentUpdated = await tx.paymentTransaction.updateMany({
-          where: { id: current.id, status: 'INITIATED' },
-          data: {
-            status: 'FAILED',
-            verifiedAt: new Date(),
-          },
-        });
-        await tx.order.updateMany({
-          where: { id: currentOrderId, paymentStatus: 'PENDING' },
-          data: { paymentStatus: 'FAILED', orderStatus: 'CANCELED' },
-        });
-
-        if (paymentUpdated.count > 0) {
-          if (current.order?.discountCode) {
-            await tx.discountCode.updateMany({
-              where: {
-                code: current.order.discountCode,
-                usedCount: { gt: 0 },
-                isDeleted: false,
-              },
-              data: { usedCount: { decrement: 1 } },
-            });
-          }
-
-          const items = await tx.orderItem.findMany({
-            where: { orderId: currentOrderId, isDeleted: false },
-            select: { productVariantId: true, quantity: true },
-          });
-
-          const quantityByVariant = new Map<string, number>();
-          for (const item of items) {
-            quantityByVariant.set(
-              item.productVariantId,
-              (quantityByVariant.get(item.productVariantId) ?? 0) +
-                item.quantity,
-            );
-          }
-
-          for (const [
-            productVariantId,
-            quantity,
-          ] of quantityByVariant.entries()) {
-            await tx.productVariant.updateMany({
-              where: { id: productVariantId, isDeleted: false },
-              data: { stock: { increment: quantity } },
-            });
-          }
-
-          await this.restoreBasketItems(
+        const released = await this.orderReservation.releaseOrder(
+          tx,
+          currentOrderId,
+        );
+        if (released) {
+          await this.restoreOrderToBasket(
             tx,
+            currentOrderId,
             current.order!.userId,
-            quantityByVariant,
           );
         }
 
@@ -509,58 +400,15 @@ export class PaymentController {
           trackId,
         });
       } catch {
-        const paymentUpdated = await tx.paymentTransaction.updateMany({
-          where: { id: current.id, status: 'INITIATED' },
-          data: {
-            status: 'FAILED',
-            verifiedAt: new Date(),
-          },
-        });
-        await tx.order.updateMany({
-          where: { id: currentOrderId, paymentStatus: 'PENDING' },
-          data: { paymentStatus: 'FAILED', orderStatus: 'CANCELED' },
-        });
-
-        if (paymentUpdated.count > 0) {
-          if (current.order?.discountCode) {
-            await tx.discountCode.updateMany({
-              where: {
-                code: current.order.discountCode,
-                usedCount: { gt: 0 },
-                isDeleted: false,
-              },
-              data: { usedCount: { decrement: 1 } },
-            });
-          }
-
-          const items = await tx.orderItem.findMany({
-            where: { orderId: currentOrderId, isDeleted: false },
-            select: { productVariantId: true, quantity: true },
-          });
-
-          const quantityByVariant = new Map<string, number>();
-          for (const item of items) {
-            quantityByVariant.set(
-              item.productVariantId,
-              (quantityByVariant.get(item.productVariantId) ?? 0) +
-                item.quantity,
-            );
-          }
-
-          for (const [
-            productVariantId,
-            quantity,
-          ] of quantityByVariant.entries()) {
-            await tx.productVariant.updateMany({
-              where: { id: productVariantId, isDeleted: false },
-              data: { stock: { increment: quantity } },
-            });
-          }
-
-          await this.restoreBasketItems(
+        const released = await this.orderReservation.releaseOrder(
+          tx,
+          currentOrderId,
+        );
+        if (released) {
+          await this.restoreOrderToBasket(
             tx,
+            currentOrderId,
             current.order!.userId,
-            quantityByVariant,
           );
         }
 
