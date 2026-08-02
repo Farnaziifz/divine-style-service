@@ -4,6 +4,7 @@ import { ShippingMethodController } from './shipping-method.controller';
 import { OtpProviderController } from './otp-provider.controller';
 import { PaymentProvidersController } from './payment-providers.controller';
 import { PricingSettingsController } from './pricing-settings.controller';
+import { OrderNotificationPhoneController } from './order-notification-phone.controller';
 
 @Module({
   imports: [SharedModule],
@@ -12,6 +13,7 @@ import { PricingSettingsController } from './pricing-settings.controller';
     OtpProviderController,
     PaymentProvidersController,
     PricingSettingsController,
+    OrderNotificationPhoneController,
   ],
 })
 export class SiteSettingsModule {}
