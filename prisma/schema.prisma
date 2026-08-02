@@ -350,6 +350,10 @@ model Product {
   updatedAt   DateTime  @updatedAt
   isDeleted   Boolean   @default(false)
   deletedAt   DateTime?
+
+  // آخرین باری که به دلیل صفر شدن موجودی، پیامک اطلاع‌رسانی برای مدیر ارسال شد.
+  // با برگشتن موجودی به حالت مثبت، دوباره null می‌شود تا دفعهٔ بعد که ناموجود شد هشدار تازه بره.
+  outOfStockNotifiedAt DateTime?
 }
 
 enum ContentEntryType {

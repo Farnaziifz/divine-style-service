@@ -76,4 +76,14 @@ export class SmsTextService {
       `دیواین استایل`
     );
   }
+
+  buildOutOfStockAlertText(productTitles: string[]): string {
+    const list = productTitles.map((t) => `• ${t}`).join('\n');
+    return (
+      `⚠️ موجودی محصولات زیر تمام شد\n` +
+      `${list}\n` +
+      `لطفا موجودی رو در پنل ادمین به‌روزرسانی کنید.\n` +
+      `دیواین استایل`
+    );
+  }
 }

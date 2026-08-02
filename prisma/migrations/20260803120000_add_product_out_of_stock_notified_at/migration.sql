@@ -1,0 +1,1 @@
+ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "outOfStockNotifiedAt" TIMESTAMP(3);

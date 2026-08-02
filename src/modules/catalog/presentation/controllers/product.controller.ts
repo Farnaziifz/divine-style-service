@@ -86,6 +86,34 @@ export class ProductController {
     return this.queryBus.execute(new GetProductsQuery(filter, includeInactive));
   }
 
+  @Get('out-of-stock')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'لیست محصولاتی که موجودی هیچ واریانتی ندارند' })
+  async findOutOfStock(@Req() req: any) {
+    this.assertCanWrite(req);
+    return this.prisma.product.findMany({
+      where: {
+        isActive: true,
+        isDeleted: false,
+        variants: { none: { isDeleted: false, stock: { gt: 0 } } },
+      },
+      orderBy: { outOfStockNotifiedAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        code: true,
+        images: true,
+        outOfStockNotifiedAt: true,
+        category: { select: { id: true, title: true } },
+        variants: {
+          where: { isDeleted: false },
+          select: { id: true, sku: true, size: true, color: true, stock: true },
+        },
+      },
+    });
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get product by id' })
   async findOne(@Param('id') id: string, @Req() req: Request) {

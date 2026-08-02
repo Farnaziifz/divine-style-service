@@ -44,6 +44,7 @@ import { GetProductHandler } from './application/queries/handlers/get-product.ha
 
 // Services
 import { PricingService } from './application/services/pricing.service';
+import { OutOfStockAlertService } from './application/services/out-of-stock-alert.service';
 
 // Handlers - Specification
 import { CreateSpecificationKeyHandler } from './application/commands/handlers/create-specification-key.handler';
@@ -72,6 +73,7 @@ import { GetSpecificationKeysHandler } from './application/queries/handlers/get-
   ],
   providers: [
     PricingService,
+    OutOfStockAlertService,
     { provide: 'ICollectionRepository', useClass: PrismaCollectionRepository },
     { provide: 'ICategoryRepository', useClass: PrismaCategoryRepository },
     { provide: 'IProductRepository', useClass: PrismaProductRepository },
