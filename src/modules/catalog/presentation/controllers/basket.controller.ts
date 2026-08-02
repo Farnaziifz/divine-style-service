@@ -16,7 +16,6 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { DiscountService } from '../../../discount/discount.service';
 import { PaymentService } from '../../../payment/payment.service';
 import { OrderReservationService } from '../../../order/order-reservation.service';
-import { SmsTextService } from '../../../shared/sms/sms-text.service';
 import { RESERVATION_TTL_MS } from '../../../order/reservation.constants';
 import { UpsertBasketItemDto } from '../dtos/upsert-basket-item.dto';
 import { UpdateBasketItemDto } from '../dtos/update-basket-item.dto';
@@ -63,37 +62,7 @@ export class BasketController {
     private readonly discountService: DiscountService,
     private readonly paymentService: PaymentService,
     private readonly orderReservation: OrderReservationService,
-    private readonly smsText: SmsTextService,
   ) {}
-
-  private async notifyOrderRegistered(
-    customerMobile: string | undefined,
-    orderCode: string,
-    payableAmount: number,
-  ): Promise<void> {
-    try {
-      const recipients = await this.prisma.orderNotificationPhone.findMany({
-        where: { isActive: true, isDeleted: false },
-        select: { phoneNumber: true },
-      });
-      const adminText = this.smsText.buildAdminOrderNotificationText(
-        customerMobile ?? '-',
-        orderCode,
-        payableAmount,
-      );
-      await Promise.all(
-        recipients.map((r) => this.smsText.send(r.phoneNumber, adminText)),
-      );
-
-      if (customerMobile) {
-        const customerText =
-          this.smsText.buildCustomerOrderRegisteredText(orderCode);
-        await this.smsText.send(customerMobile, customerText);
-      }
-    } catch {
-      // Notification failure must never affect the checkout flow.
-    }
-  }
 
   private async getOrCreateActiveBasket(userId: string) {
     const existing = await this.prisma.tempBasket.findFirst({
@@ -475,6 +444,17 @@ export class BasketController {
     const userId = req.user.id;
     const now = new Date();
 
+    const profile = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true, lastName: true },
+    });
+    if (!profile?.name?.trim() || !profile?.lastName?.trim()) {
+      throw new BadRequestException({
+        code: 'PROFILE_INCOMPLETE',
+        message: 'برای ثبت سفارش، لطفا نام و نام خانوادگی خود را تکمیل کنید',
+      });
+    }
+
     const baseResult = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`checkout:${userId}`}))`;
 
@@ -811,12 +791,6 @@ export class BasketController {
         paymentProvider,
       };
     });
-
-    void this.notifyOrderRegistered(
-      req.user?.mobile,
-      baseResult.orderCode,
-      baseResult.payableAmount,
-    );
 
     const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:3005';
     const requestedLangRaw = (dto as any)?.lang?.trim?.();

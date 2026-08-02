@@ -8,6 +8,7 @@ import { PaginationDto } from '../shared/dtos/pagination.dto';
 import { PaymentService } from './payment.service';
 import { OrderReservationService } from '../order/order-reservation.service';
 import { RESERVATION_TTL_MS } from '../order/reservation.constants';
+import { SmsTextService } from '../shared/sms/sms-text.service';
 
 @ApiTags('Payment')
 @Controller('payments')
@@ -18,7 +19,42 @@ export class PaymentController {
     private readonly prisma: PrismaService,
     private readonly paymentService: PaymentService,
     private readonly orderReservation: OrderReservationService,
+    private readonly smsText: SmsTextService,
   ) {}
+
+  /**
+   * Fired only once a payment actually clears — not at checkout/order
+   * creation, so a user who abandons the gateway never gets a "order
+   * registered" SMS for an order that was never paid for.
+   */
+  private async notifyOrderPaid(
+    customerMobile: string | undefined,
+    orderCode: string,
+    payableAmount: number,
+  ): Promise<void> {
+    try {
+      const recipients = await this.prisma.orderNotificationPhone.findMany({
+        where: { isActive: true, isDeleted: false },
+        select: { phoneNumber: true },
+      });
+      const adminText = this.smsText.buildAdminOrderNotificationText(
+        customerMobile ?? '-',
+        orderCode,
+        payableAmount,
+      );
+      await Promise.all(
+        recipients.map((r) => this.smsText.send(r.phoneNumber, adminText)),
+      );
+
+      if (customerMobile) {
+        const customerText =
+          this.smsText.buildCustomerOrderRegisteredText(orderCode);
+        await this.smsText.send(customerMobile, customerText);
+      }
+    } catch {
+      // Notification failure must never affect the payment callback flow.
+    }
+  }
 
   /**
    * After releaseOrder() frees the stock, put the order's items back into
@@ -262,12 +298,13 @@ export class PaymentController {
 
       const current = await tx.paymentTransaction.findFirst({
         where: { authority, isDeleted: false },
-        include: { order: true },
+        include: { order: { include: { user: { select: { mobile: true } } } } },
       });
 
       if (!current) {
         return {
           redirect: `${frontendUrl}/${language}/payment/failed`,
+          paid: null,
         };
       }
 
@@ -280,6 +317,7 @@ export class PaymentController {
       ) {
         return {
           redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
+          paid: null,
         };
       }
 
@@ -290,6 +328,7 @@ export class PaymentController {
         }
         return {
           redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
+          paid: null,
         };
       }
 
@@ -308,6 +347,7 @@ export class PaymentController {
 
         return {
           redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
+          paid: null,
         };
       }
 
@@ -330,8 +370,21 @@ export class PaymentController {
 
       return {
         redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
+        paid: {
+          customerMobile: current.order?.user?.mobile,
+          orderCode,
+          payableAmount: Math.round(Number(current.amount)),
+        },
       };
     });
+
+    if (callbackResult.paid) {
+      void this.notifyOrderPaid(
+        callbackResult.paid.customerMobile,
+        callbackResult.paid.orderCode,
+        callbackResult.paid.payableAmount,
+      );
+    }
 
     return res.redirect(callbackResult.redirect);
   }
@@ -354,12 +407,13 @@ export class PaymentController {
 
       const current = await tx.paymentTransaction.findFirst({
         where: { authority: trackId, isDeleted: false },
-        include: { order: true },
+        include: { order: { include: { user: { select: { mobile: true } } } } },
       });
 
       if (!current) {
         return {
           redirect: `${frontendUrl}/${language}/payment/failed`,
+          paid: null,
         };
       }
 
@@ -372,6 +426,7 @@ export class PaymentController {
       ) {
         return {
           redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
+          paid: null,
         };
       }
 
@@ -391,6 +446,7 @@ export class PaymentController {
 
         return {
           redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
+          paid: null,
         };
       }
 
@@ -414,6 +470,7 @@ export class PaymentController {
 
         return {
           redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
+          paid: null,
         };
       }
 
@@ -436,8 +493,21 @@ export class PaymentController {
 
       return {
         redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
+        paid: {
+          customerMobile: current.order?.user?.mobile,
+          orderCode,
+          payableAmount: Math.round(Number(current.amount)),
+        },
       };
     });
+
+    if (callbackResult.paid) {
+      void this.notifyOrderPaid(
+        callbackResult.paid.customerMobile,
+        callbackResult.paid.orderCode,
+        callbackResult.paid.payableAmount,
+      );
+    }
 
     return res.redirect(callbackResult.redirect);
   }
