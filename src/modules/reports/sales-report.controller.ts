@@ -88,6 +88,31 @@ export class AdminSalesReportController {
     return String(value);
   }
 
+  /** هزینه ثابت بسته‌بندی فعلی (تومان) از تنظیمات سراسری سایت. */
+  private async getPackagingCost(): Promise<number> {
+    const setting = await this.prisma.siteSetting.findUnique({
+      where: { key: 'PACKAGING_COST' },
+      select: { value: true },
+    });
+    return Number(setting?.value) || 0;
+  }
+
+  /**
+   * سود خالص = مبلغ پرداختی − هزینه ارسال − بهای تمام‌شدهٔ کالاها − (هزینه بسته‌بندی × تعداد آیتم)
+   * توجه: تخفیف سفارش از قبل در مبلغ پرداختی لحاظ شده. بهای تمام‌شده و هزینه بسته‌بندی
+   * بر اساس مقدار فعلی محصول/تنظیمات محاسبه می‌شود (نه مقدار لحظهٔ ثبت سفارش).
+   */
+  private computeNetProfit(params: {
+    payableAmount: number;
+    shippingCost: number;
+    costOfGoods: number;
+    quantity: number;
+    packagingCost: number;
+  }): number {
+    const { payableAmount, shippingCost, costOfGoods, quantity, packagingCost } = params;
+    return payableAmount - shippingCost - costOfGoods - packagingCost * quantity;
+  }
+
   @Get('summary')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
@@ -126,21 +151,52 @@ export class AdminSalesReportController {
       _count: { id: true },
     });
 
+    const [costRows, packagingCost] = await Promise.all([
+      this.prisma.$queryRaw<Array<{ cost_of_goods: Prisma.Decimal }>>(Prisma.sql`
+        SELECT COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods
+        FROM "OrderItem" oi
+        INNER JOIN "Order" o ON o.id = oi."orderId"
+        INNER JOIN "Product" p ON p.id = oi."productId"
+        WHERE
+          oi."isDeleted" = false
+          AND o."isDeleted" = false
+          AND o."paymentStatus" = 'PAID'
+          AND o."paidAt" IS NOT NULL
+          AND o."paidAt" >= ${start}
+          AND o."paidAt" <= ${end}
+      `),
+      this.getPackagingCost(),
+    ]);
+
     const ordersCount = orderAgg._count.id ?? 0;
     const payable = orderAgg._sum.payableAmount ?? new Prisma.Decimal(0);
     const averageOrderValue =
       ordersCount > 0 ? payable.div(ordersCount) : new Prisma.Decimal(0);
 
+    const quantity = itemAgg._sum.quantity ?? 0;
+    const costOfGoods = Number(costRows[0]?.cost_of_goods ?? 0);
+    const shippingCost = Number(orderAgg._sum.shippingCost ?? 0);
+    const netProfit = this.computeNetProfit({
+      payableAmount: Number(payable),
+      shippingCost,
+      costOfGoods,
+      quantity,
+      packagingCost,
+    });
+
     return {
       range: { from: start.toISOString(), to: end.toISOString() },
       ordersCount,
-      itemsCount: itemAgg._sum.quantity ?? 0,
+      itemsCount: quantity,
       orderItemsCount: itemAgg._count.id ?? 0,
       totalAmount: this.money(orderAgg._sum.totalAmount),
       discountAmount: this.money(orderAgg._sum.discountAmount),
       shippingCost: this.money(orderAgg._sum.shippingCost),
       payableAmount: this.money(orderAgg._sum.payableAmount),
       averageOrderValue: this.money(averageOrderValue),
+      costOfGoods: this.money(costOfGoods),
+      packagingCost: this.money(packagingCost * quantity),
+      netProfit: this.money(netProfit),
     };
   }
 
@@ -273,31 +329,59 @@ export class AdminSalesReportController {
     const { start } = this.jalaaliMonthRange(jy, 1);
     const { start: end } = this.jalaaliMonthRange(jy + 1, 1);
 
-    const rows = await this.prisma.$queryRaw<
-      Array<{
-        day: string;
-        orders_count: bigint;
-        payable_amount: Prisma.Decimal;
-      }>
-    >(Prisma.sql`
-      SELECT
-        to_char(date_trunc('day', ("paidAt" AT TIME ZONE 'Asia/Tehran')), 'YYYY-MM-DD') AS day,
-        COUNT(*)::bigint AS orders_count,
-        COALESCE(SUM("payableAmount"), 0)::numeric AS payable_amount
-      FROM "Order"
-      WHERE
-        "isDeleted" = false
-        AND "paymentStatus" = 'PAID'
-        AND "paidAt" IS NOT NULL
-        AND "paidAt" >= ${start}
-        AND "paidAt" < ${end}
-      GROUP BY 1
-      ORDER BY 1 ASC
-    `);
+    const [rows, itemRows, packagingCost] = await Promise.all([
+      this.prisma.$queryRaw<
+        Array<{
+          day: string;
+          orders_count: bigint;
+          payable_amount: Prisma.Decimal;
+          shipping_cost: Prisma.Decimal;
+        }>
+      >(Prisma.sql`
+        SELECT
+          to_char(date_trunc('day', ("paidAt" AT TIME ZONE 'Asia/Tehran')), 'YYYY-MM-DD') AS day,
+          COUNT(*)::bigint AS orders_count,
+          COALESCE(SUM("payableAmount"), 0)::numeric AS payable_amount,
+          COALESCE(SUM("shippingCost"), 0)::numeric AS shipping_cost
+        FROM "Order"
+        WHERE
+          "isDeleted" = false
+          AND "paymentStatus" = 'PAID'
+          AND "paidAt" IS NOT NULL
+          AND "paidAt" >= ${start}
+          AND "paidAt" < ${end}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `),
+      this.prisma.$queryRaw<
+        Array<{ day: string; quantity: bigint; cost_of_goods: Prisma.Decimal }>
+      >(Prisma.sql`
+        SELECT
+          to_char(date_trunc('day', (o."paidAt" AT TIME ZONE 'Asia/Tehran')), 'YYYY-MM-DD') AS day,
+          COALESCE(SUM(oi."quantity"), 0)::bigint AS quantity,
+          COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods
+        FROM "OrderItem" oi
+        INNER JOIN "Order" o ON o.id = oi."orderId"
+        INNER JOIN "Product" p ON p.id = oi."productId"
+        WHERE
+          oi."isDeleted" = false
+          AND o."isDeleted" = false
+          AND o."paymentStatus" = 'PAID'
+          AND o."paidAt" IS NOT NULL
+          AND o."paidAt" >= ${start}
+          AND o."paidAt" < ${end}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `),
+      this.getPackagingCost(),
+    ]);
 
     const buckets = Array.from({ length: 12 }, () => ({
       ordersCount: 0,
       payableAmount: 0,
+      shippingCost: 0,
+      quantity: 0,
+      costOfGoods: 0,
     }));
     for (const r of rows) {
       const [gy, gm, gd] = r.day.split('-').map(Number);
@@ -305,6 +389,15 @@ export class AdminSalesReportController {
       if (j.jy === jy) {
         buckets[j.jm - 1].ordersCount += Number(r.orders_count);
         buckets[j.jm - 1].payableAmount += Number(r.payable_amount);
+        buckets[j.jm - 1].shippingCost += Number(r.shipping_cost);
+      }
+    }
+    for (const r of itemRows) {
+      const [gy, gm, gd] = r.day.split('-').map(Number);
+      const j = toJalaali(gy, gm, gd);
+      if (j.jy === jy) {
+        buckets[j.jm - 1].quantity += Number(r.quantity);
+        buckets[j.jm - 1].costOfGoods += Number(r.cost_of_goods);
       }
     }
 
@@ -315,6 +408,13 @@ export class AdminSalesReportController {
         monthName: JALALI_MONTH_NAMES[i],
         ordersCount: b.ordersCount,
         payableAmount: b.payableAmount,
+        netProfit: this.computeNetProfit({
+          payableAmount: b.payableAmount,
+          shippingCost: b.shippingCost,
+          costOfGoods: b.costOfGoods,
+          quantity: b.quantity,
+          packagingCost,
+        }),
       })),
     };
   }
