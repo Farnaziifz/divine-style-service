@@ -33,6 +33,10 @@ model User {
   shoppingList              ShoppingListItem[]
   discountCodes             DiscountCode[]
   discountCodeEligibilities DiscountCodeEligibleUser[]
+  customerGroupMemberships  CustomerGroupMember[]
+  segmentMemberships        SegmentMembership[]
+  incentiveRedemptions      IncentiveRedemption[]
+  wallet                    Wallet?
   directConversation        DirectConversation?
   directMessages            DirectMessage[]            @relation("DirectMessageAuthor")
   createdAt                 DateTime                   @default(now())
@@ -81,8 +85,9 @@ model DiscountCode {
   /// وقتی scope = SINGLE_USER
   userId      String?           @db.Uuid
   user        User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
-  /// وقتی scope = USER_GROUP (جدول گروه بعداً اضافه می‌شود)
+  /// وقتی scope = USER_GROUP
   userGroupId String?           @db.Uuid
+  userGroup   CustomerGroup?    @relation(fields: [userGroupId], references: [id], onDelete: SetNull)
 
   /// وقتی scope = MULTIPLE_USERS
   eligibleUsers DiscountCodeEligibleUser[]
@@ -121,6 +126,35 @@ model DiscountCodeEligibleUser {
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([discountCodeId, userId])
+  @@index([userId])
+}
+
+/// دسته‌بندی دستی مشتریان (مثلاً «مشتریان وفادار»، «مشتریان از دست رفته») برای هدف‌گیری کمپین‌های مارکتینگ
+model CustomerGroup {
+  id            String                @id @default(uuid()) @db.Uuid
+  title         String
+  description   String?
+  members       CustomerGroupMember[]
+  discountCodes DiscountCode[]
+
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  @@index([isActive])
+}
+
+model CustomerGroupMember {
+  id              String        @id @default(uuid()) @db.Uuid
+  customerGroupId String        @db.Uuid
+  customerGroup   CustomerGroup @relation(fields: [customerGroupId], references: [id], onDelete: Cascade)
+  userId          String        @db.Uuid
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addedAt         DateTime      @default(now())
+
+  @@unique([customerGroupId, userId])
   @@index([userId])
 }
 
@@ -532,30 +566,31 @@ enum OrderStatus {
 }
 
 model Order {
-  id                  String               @id @default(uuid()) @db.Uuid
-  orderCode           String               @unique
-  userId              String               @db.Uuid
-  user                User                 @relation(fields: [userId], references: [id])
-  items               OrderItem[]
-  comments            OrderComment[]
-  totalAmount         Decimal              @default(0) @db.Decimal(10, 2)
-  discountCode        String?
-  discountAmount      Decimal              @default(0) @db.Decimal(10, 2)
-  shippingCost        Decimal              @default(0) @db.Decimal(10, 2)
-  shippingMethodId    String?              @db.Uuid
-  shippingMethod      ShippingMethod?      @relation(fields: [shippingMethodId], references: [id], onDelete: SetNull)
-  shippingMethodTitle String?
-  shippingMethodPrice Int?
-  payableAmount       Decimal              @default(0) @db.Decimal(10, 2)
-  shippingAddress     Json?                @db.JsonB
-  paymentStatus       PaymentStatus        @default(PENDING)
-  orderStatus         OrderStatus          @default(PENDING_PAYMENT)
-  paidAt              DateTime?
-  payments            PaymentTransaction[]
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  isDeleted           Boolean              @default(false)
-  deletedAt           DateTime?
+  id                   String                @id @default(uuid()) @db.Uuid
+  orderCode            String                @unique
+  userId               String                @db.Uuid
+  user                 User                  @relation(fields: [userId], references: [id])
+  items                OrderItem[]
+  comments             OrderComment[]
+  totalAmount          Decimal               @default(0) @db.Decimal(10, 2)
+  discountCode         String?
+  discountAmount       Decimal               @default(0) @db.Decimal(10, 2)
+  shippingCost         Decimal               @default(0) @db.Decimal(10, 2)
+  shippingMethodId     String?               @db.Uuid
+  shippingMethod       ShippingMethod?       @relation(fields: [shippingMethodId], references: [id], onDelete: SetNull)
+  shippingMethodTitle  String?
+  shippingMethodPrice  Int?
+  payableAmount        Decimal               @default(0) @db.Decimal(10, 2)
+  shippingAddress      Json?                 @db.JsonB
+  paymentStatus        PaymentStatus         @default(PENDING)
+  orderStatus          OrderStatus           @default(PENDING_PAYMENT)
+  paidAt               DateTime?
+  payments             PaymentTransaction[]
+  incentiveRedemptions IncentiveRedemption[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  isDeleted            Boolean               @default(false)
+  deletedAt            DateTime?
 
   @@index([shippingMethodId])
   @@index([paidAt])
@@ -625,4 +660,240 @@ model OrderItem {
   @@index([orderId])
   @@index([productId])
   @@index([productVariantId])
+}
+
+// ----------------------
+// Customer Loyalty Club
+// ----------------------
+
+model CustomerSegment {
+  id          String   @id @default(uuid()) @db.Uuid
+  /// شناسه پایدار برای رفرنس دادن از کد (مثلاً "vip"، "at_risk")
+  key         String   @unique
+  label       String
+  description String?
+  createdAt   DateTime @default(now())
+
+  memberships SegmentMembership[]
+  incentives  Incentive[]
+}
+
+/// تاریخچهٔ عضویت مشتری در سگمنت‌ها — سری زمانی، هر بار محاسبه یک رکورد جدید (نه یکتا به‌ازای مشتری)
+model SegmentMembership {
+  id             String          @id @default(uuid()) @db.Uuid
+  customerId     String          @db.Uuid
+  customer       User            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  segmentId      String          @db.Uuid
+  segment        CustomerSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  recencyDays    Int
+  frequencyCount Int
+  monetaryTotal  Decimal         @db.Decimal(12, 2)
+  computedAt     DateTime        @default(now())
+
+  @@index([customerId])
+  @@index([segmentId])
+  @@index([computedAt])
+}
+
+enum IncentiveType {
+  DISCOUNT_CODE
+  CASHBACK
+  COUPON
+  CREDIT_GIFT
+  POINTS_BADGE
+}
+
+enum IncentiveValueType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+/// جدول پایه با الگوی discriminator — جزئیات هر نوع در جدول ۱:۱ مخصوص خودش
+model Incentive {
+  id              String           @id @default(uuid()) @db.Uuid
+  type            IncentiveType
+  title           String
+  /// null = برای همه مشتریان
+  targetSegmentId String?          @db.Uuid
+  targetSegment   CustomerSegment? @relation(fields: [targetSegmentId], references: [id], onDelete: SetNull)
+  isActive        Boolean          @default(true)
+  startsAt        DateTime
+  endsAt          DateTime
+  createdAt       DateTime         @default(now())
+
+  discountCodeDetail DiscountCodeDetail?
+  cashbackDetail     CashbackDetail?
+  couponDetail       CouponDetail?
+  creditGiftDetail   CreditGiftDetail?
+  pointsBadgeDetail  PointsBadgeDetail?
+  redemptions        IncentiveRedemption[]
+
+  @@index([type])
+  @@index([targetSegmentId])
+  @@index([isActive, startsAt, endsAt])
+}
+
+enum IncentiveTierType {
+  FLAT
+  STEPPED
+}
+
+enum IncentiveUsageType {
+  SINGLE_USE
+  MULTI_USE
+}
+
+/// جزئیات وقتی Incentive.type = DISCOUNT_CODE
+model DiscountCodeDetail {
+  incentiveId       String             @id @db.Uuid
+  incentive         Incentive          @relation(fields: [incentiveId], references: [id], onDelete: Cascade)
+  code              String             @unique
+  valueType         IncentiveValueType
+  /// وقتی tierType = FLAT، مقدار تخفیف همین است (پله‌ای در کار نیست)
+  value             Decimal            @db.Decimal(12, 2)
+  tierType          IncentiveTierType  @default(FLAT)
+  usageType         IncentiveUsageType @default(SINGLE_USE)
+  minPurchaseAmount Decimal?           @db.Decimal(12, 2)
+  /// وقتی tierType = STEPPED — لیست پله‌ها بر اساس حداقل مبلغ سفارش
+  tiers             DiscountCodeTier[]
+}
+
+/// یک پلهٔ تخفیف پلکانی — بالاترین پله‌ای که minAmount آن <= مبلغ سفارش باشد اعمال می‌شود (flat-at-tier)
+model DiscountCodeTier {
+  id                   String             @id @default(uuid()) @db.Uuid
+  discountCodeDetailId String             @db.Uuid
+  discountCodeDetail   DiscountCodeDetail @relation(fields: [discountCodeDetailId], references: [incentiveId], onDelete: Cascade)
+  minAmount            Decimal            @db.Decimal(12, 2)
+  /// درصد یا مبلغ ثابت، بسته به valueType والد (DiscountCodeDetail.valueType)
+  value                Decimal            @db.Decimal(12, 2)
+
+  @@index([discountCodeDetailId])
+}
+
+/// جزئیات وقتی Incentive.type = CASHBACK
+model CashbackDetail {
+  incentiveId       String             @id @db.Uuid
+  incentive         Incentive          @relation(fields: [incentiveId], references: [id], onDelete: Cascade)
+  valueType         IncentiveValueType
+  value             Decimal            @db.Decimal(12, 2)
+  expiresAfterDays  Int?
+  minPurchaseAmount Decimal?           @db.Decimal(12, 2)
+}
+
+enum CouponTriggerType {
+  FIRST_PURCHASE
+  PURCHASE_ABOVE_AMOUNT
+  REFERRAL
+  CATEGORY_PURCHASE
+}
+
+/// جزئیات وقتی Incentive.type = COUPON
+model CouponDetail {
+  incentiveId       String             @id @db.Uuid
+  incentive         Incentive          @relation(fields: [incentiveId], references: [id], onDelete: Cascade)
+  triggerType       CouponTriggerType
+  /// پیکربندی محرک (مثلاً { "categoryId": "..." } یا { "minAmount": 500000 })
+  triggerConfig     Json
+  rewardDescription String
+  /// درصد یا مبلغ ثابت پاداش — درصد فقط وقتی سفارش محرک وجود دارد قابل‌محاسبه است (نه در REFERRAL بدون سفارش)
+  rewardValueType   IncentiveValueType
+  rewardValue       Decimal            @db.Decimal(12, 2)
+}
+
+/// جزئیات وقتی Incentive.type = CREDIT_GIFT — واریز اعتبار به کیف‌پول مشتری پس از ریدیم
+model CreditGiftDetail {
+  incentiveId       String    @id @db.Uuid
+  incentive         Incentive @relation(fields: [incentiveId], references: [id], onDelete: Cascade)
+  amount            Decimal   @db.Decimal(12, 2)
+  /// null = بدون انقضا
+  expiresAfterDays  Int?
+  minPurchaseAmount Decimal?  @db.Decimal(12, 2)
+}
+
+/// جزئیات وقتی Incentive.type = POINTS_BADGE — می‌تواند فقط امتیاز، فقط نشان، یا هر دو باشد
+model PointsBadgeDetail {
+  incentiveId   String    @id @db.Uuid
+  incentive     Incentive @relation(fields: [incentiveId], references: [id], onDelete: Cascade)
+  pointsAwarded Int
+  badgeKey      String?
+  badgeLabel    String?
+}
+
+model IncentiveRedemption {
+  id            String    @id @default(uuid()) @db.Uuid
+  incentiveId   String    @db.Uuid
+  incentive     Incentive @relation(fields: [incentiveId], references: [id], onDelete: Cascade)
+  customerId    String    @db.Uuid
+  customer      User      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orderId       String?   @db.Uuid
+  order         Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  redeemedAt    DateTime  @default(now())
+  amountApplied Decimal   @db.Decimal(12, 2)
+
+  creditLedgerEntry CreditLedgerEntry?
+
+  @@index([incentiveId])
+  @@index([customerId])
+  @@index([orderId])
+}
+
+/// کیف‌پول اعتباری مشتری — موجودی فعلی؛ تاریخچهٔ تراکنش‌ها در CreditLedgerEntry
+model Wallet {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance   Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ledgerEntries CreditLedgerEntry[]
+}
+
+enum CreditLedgerReason {
+  GIFT
+  CASHBACK
+  COUPON
+  USED
+  EXPIRED
+  ADJUSTMENT
+}
+
+model CreditLedgerEntry {
+  id                    String               @id @default(uuid()) @db.Uuid
+  walletId              String               @db.Uuid
+  wallet                Wallet               @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  /// مثبت = واریز، منفی = برداشت/انقضا
+  amount                Decimal              @db.Decimal(12, 2)
+  reason                CreditLedgerReason
+  /// وقتی reason = GIFT — ریدیمی که این واریز از آن ایجاد شده
+  incentiveRedemptionId String?              @unique @db.Uuid
+  incentiveRedemption   IncentiveRedemption? @relation(fields: [incentiveRedemptionId], references: [id], onDelete: SetNull)
+  expiresAt             DateTime?
+  createdAt             DateTime             @default(now())
+
+  @@index([walletId])
+}
+
+model ChurnEvaluationSnapshot {
+  id               String   @id @default(uuid()) @db.Uuid
+  computedAt       DateTime @default(now())
+  totalCustomers   Int
+  atRiskCount      Int
+  lostCount        Int
+  regularCount     Int
+  churnRatePercent Decimal  @db.Decimal(5, 2)
+
+  @@index([computedAt])
+}
+
+model LoyaltyEvaluationSnapshot {
+  id                 String   @id @default(uuid()) @db.Uuid
+  computedAt         DateTime @default(now())
+  totalCustomers     Int
+  loyalCount         Int
+  promisingCount     Int
+  regularCount       Int
+  loyaltyRatePercent Decimal  @db.Decimal(5, 2)
+
+  @@index([computedAt])
 }

@@ -1,0 +1,116 @@
+import {
+  IncentiveTierType,
+  IncentiveUsageType,
+  IncentiveValueType,
+} from '@prisma/client';
+
+export type RedemptionFailureReason =
+  | 'INACTIVE'
+  | 'NOT_STARTED'
+  | 'EXPIRED'
+  | 'WRONG_SEGMENT'
+  | 'ALREADY_USED'
+  | 'BELOW_MINIMUM';
+
+export interface RedemptionValidationInput {
+  isActive: boolean;
+  startsAt: Date;
+  endsAt: Date;
+  /** null = تخفیف برای همه مشتریان است، محدود به سگمنت خاصی نیست */
+  targetSegmentId: string | null;
+  /** آخرین سگمنتی که مشتری در آن قرار دارد؛ null یعنی مشتری هنوز هیچ سگمنتی ندارد */
+  customerCurrentSegmentId: string | null;
+  usageType: IncentiveUsageType;
+  alreadyUsedByCustomer: boolean;
+  minPurchaseAmount: number | null;
+  orderAmount: number;
+  /** برای تست‌پذیری؛ پیش‌فرض زمان واقعی */
+  now?: Date;
+}
+
+export interface RedemptionValidationResult {
+  valid: boolean;
+  reason?: RedemptionFailureReason;
+}
+
+/** خالص، بدون وابستگی به DB — همهٔ داده‌های لازم از قبل واکشی و پاس داده می‌شوند */
+export function validateRedemption(
+  input: RedemptionValidationInput,
+): RedemptionValidationResult {
+  const now = input.now ?? new Date();
+
+  if (!input.isActive) {
+    return { valid: false, reason: 'INACTIVE' };
+  }
+  if (now < input.startsAt) {
+    return { valid: false, reason: 'NOT_STARTED' };
+  }
+  if (now > input.endsAt) {
+    return { valid: false, reason: 'EXPIRED' };
+  }
+  if (
+    input.targetSegmentId != null &&
+    input.customerCurrentSegmentId !== input.targetSegmentId
+  ) {
+    return { valid: false, reason: 'WRONG_SEGMENT' };
+  }
+  if (
+    input.usageType === IncentiveUsageType.SINGLE_USE &&
+    input.alreadyUsedByCustomer
+  ) {
+    return { valid: false, reason: 'ALREADY_USED' };
+  }
+  if (
+    input.minPurchaseAmount != null &&
+    input.orderAmount < input.minPurchaseAmount
+  ) {
+    return { valid: false, reason: 'BELOW_MINIMUM' };
+  }
+
+  return { valid: true };
+}
+
+export interface DiscountCalcTier {
+  minAmount: number;
+  value: number;
+}
+
+export interface DiscountCalcInput {
+  valueType: IncentiveValueType;
+  tierType: IncentiveTierType;
+  /** استفاده‌شده وقتی tierType = FLAT */
+  value: number;
+  /** استفاده‌شده وقتی tierType = STEPPED */
+  tiers: DiscountCalcTier[];
+  orderAmount: number;
+}
+
+/**
+ * FLAT: مقدار value مستقیم اعمال می‌شود.
+ * STEPPED (flat-at-tier): بالاترین پله‌ای که minAmount آن <= مبلغ سفارش باشد انتخاب
+ * و مقدار همان پله روی کل مبلغ سفارش اعمال می‌شود؛ اگر هیچ پله‌ای واجد شرایط نباشد تخفیف صفر است.
+ * خروجی همیشه بین ۰ و مبلغ سفارش کلمپ می‌شود.
+ */
+export function calculateDiscountAmount(input: DiscountCalcInput): number {
+  let rate: number | null = null;
+
+  if (input.tierType === IncentiveTierType.FLAT) {
+    rate = input.value;
+  } else {
+    const applicableTier = [...input.tiers]
+      .filter((t) => t.minAmount <= input.orderAmount)
+      .sort((a, b) => b.minAmount - a.minAmount)[0];
+    rate = applicableTier ? applicableTier.value : null;
+  }
+
+  if (rate == null) {
+    return 0;
+  }
+
+  const raw =
+    input.valueType === IncentiveValueType.PERCENTAGE
+      ? (input.orderAmount * rate) / 100
+      : rate;
+
+  return Math.min(Math.max(raw, 0), input.orderAmount);
+}

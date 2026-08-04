@@ -18,6 +18,8 @@ import { DirectModule } from './modules/direct/direct.module';
 import { BlogModule } from './modules/blog/blog.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { ContentCalendarModule } from './modules/content-calendar/content-calendar.module';
+import { CustomerGroupModule } from './modules/customer-group/customer-group.module';
+import { LoyaltyModule } from './modules/loyalty/loyalty.module';
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { ContentCalendarModule } from './modules/content-calendar/content-calend
     BlogModule,
     ReportsModule,
     ContentCalendarModule,
+    CustomerGroupModule,
+    LoyaltyModule,
   ],
   controllers: [AppController],
   providers: [

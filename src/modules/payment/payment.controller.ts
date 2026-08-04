@@ -9,6 +9,8 @@ import { PaymentService } from './payment.service';
 import { OrderReservationService } from '../order/order-reservation.service';
 import { RESERVATION_TTL_MS } from '../order/reservation.constants';
 import { SmsTextService } from '../shared/sms/sms-text.service';
+import { CashbackGrantService } from '../loyalty/cashback-incentive/cashback-grant.service';
+import { CouponTriggerService } from '../loyalty/coupon-incentive/coupon-trigger.service';
 
 @ApiTags('Payment')
 @Controller('payments')
@@ -20,6 +22,8 @@ export class PaymentController {
     private readonly paymentService: PaymentService,
     private readonly orderReservation: OrderReservationService,
     private readonly smsText: SmsTextService,
+    private readonly cashbackGrant: CashbackGrantService,
+    private readonly couponTrigger: CouponTriggerService,
   ) {}
 
   /**
@@ -53,6 +57,24 @@ export class PaymentController {
       }
     } catch {
       // Notification failure must never affect the payment callback flow.
+    }
+  }
+
+  /** Best-effort — a cashback grant failure must never affect the payment callback flow. */
+  private async grantCashbackForOrder(orderId: string): Promise<void> {
+    try {
+      await this.cashbackGrant.grantForOrder(orderId);
+    } catch {
+      // swallow — see comment above.
+    }
+  }
+
+  /** Best-effort — a coupon trigger evaluation failure must never affect the payment callback flow. */
+  private async evaluateCouponTriggersForOrder(orderId: string): Promise<void> {
+    try {
+      await this.couponTrigger.onOrderCompleted(orderId);
+    } catch {
+      // swallow — see comment above.
     }
   }
 
@@ -91,8 +113,8 @@ export class PaymentController {
         const normalized = parsed
           .map((x) => String(x).toUpperCase())
           .filter((x) => x === 'ZARINPAL' || x === 'ZIBAL') as Array<
-            (typeof this.providerOptions)[number]
-          >;
+          (typeof this.providerOptions)[number]
+        >;
         return normalized.length > 0
           ? Array.from(new Set(normalized))
           : ['ZARINPAL'];
@@ -104,8 +126,8 @@ export class PaymentController {
       .split(',')
       .map((x) => x.trim().toUpperCase())
       .filter((x) => x === 'ZARINPAL' || x === 'ZIBAL') as Array<
-        (typeof this.providerOptions)[number]
-      >;
+      (typeof this.providerOptions)[number]
+    >;
     return normalized.length > 0
       ? Array.from(new Set(normalized))
       : ['ZARINPAL'];
@@ -371,6 +393,7 @@ export class PaymentController {
       return {
         redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
         paid: {
+          orderId,
           customerMobile: current.order?.user?.mobile,
           orderCode,
           payableAmount: Math.round(Number(current.amount)),
@@ -384,6 +407,8 @@ export class PaymentController {
         callbackResult.paid.orderCode,
         callbackResult.paid.payableAmount,
       );
+      void this.grantCashbackForOrder(callbackResult.paid.orderId);
+      void this.evaluateCouponTriggersForOrder(callbackResult.paid.orderId);
     }
 
     return res.redirect(callbackResult.redirect);
@@ -494,6 +519,7 @@ export class PaymentController {
       return {
         redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
         paid: {
+          orderId: currentOrderId,
           customerMobile: current.order?.user?.mobile,
           orderCode,
           payableAmount: Math.round(Number(current.amount)),
@@ -507,6 +533,8 @@ export class PaymentController {
         callbackResult.paid.orderCode,
         callbackResult.paid.payableAmount,
       );
+      void this.grantCashbackForOrder(callbackResult.paid.orderId);
+      void this.evaluateCouponTriggersForOrder(callbackResult.paid.orderId);
     }
 
     return res.redirect(callbackResult.redirect);

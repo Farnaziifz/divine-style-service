@@ -13,6 +13,7 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/src/main.js",
     "backfill:content-calendar": "ts-node -r tsconfig-paths/register src/scripts/backfill-content-calendar.ts",
+    "backfill:customer-segments": "ts-node -r tsconfig-paths/register src/scripts/backfill-customer-segments.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
