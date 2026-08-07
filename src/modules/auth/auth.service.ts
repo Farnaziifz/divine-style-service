@@ -6,6 +6,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../shared/prisma/prisma.service';
+import { SmsTextService } from '../shared/sms/sms-text.service';
+import { DiscountService } from '../discount/discount.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as dns from 'node:dns';
@@ -25,7 +27,28 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private smsText: SmsTextService,
+    private discountService: DiscountService,
   ) {}
+
+  /** Best-effort — a welcome-discount failure must never block signup/login. */
+  private async issueWelcomeDiscount(
+    userId: string,
+    mobile: string,
+  ): Promise<void> {
+    try {
+      const stage =
+        await this.discountService.createWelcomeStagesForUser(userId);
+      if (!stage) return;
+      const text = this.smsText.buildWelcomeDiscountText(
+        stage.code,
+        stage.value,
+      );
+      await this.smsText.send(mobile, text);
+    } catch {
+      // swallow — see comment above.
+    }
+  }
 
   private assertOtpAttemptsAllowed(mobile: string) {
     const entry = this.otpAttempts.get(mobile);
@@ -437,6 +460,7 @@ export class AuthService {
           mobile,
         },
       });
+      void this.issueWelcomeDiscount(user.id, user.mobile);
     }
 
     // 3. Generate Tokens

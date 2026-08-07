@@ -8,8 +8,7 @@ export class SmsTextService {
     const apiKey = process.env.SMS_IR_API_KEY?.trim() || '';
     const lineNumber = process.env.SMS_IR_LINE_NUMBER?.trim() || '';
     const sendUrl =
-      process.env.SMS_IR_SEND_URL?.trim() ||
-      'https://api.sms.ir/v1/send/bulk';
+      process.env.SMS_IR_SEND_URL?.trim() || 'https://api.sms.ir/v1/send/bulk';
     const logOnly =
       (process.env.SMS_LOG_OTP_ONLY || 'false').toLowerCase() === 'true';
     return { apiKey, lineNumber, sendUrl, logOnly };
@@ -73,6 +72,23 @@ export class SmsTextService {
       `✅ سفارش شما با موفقیت ثبت شد\n` +
       `شماره سفارش: ${orderCode}\n` +
       `از خرید شما سپاسگزاریم 🌸\n` +
+      `دیواین استایل`
+    );
+  }
+
+  buildWelcomeDiscountText(code: string, percent: number): string {
+    return (
+      `🎁 به دیواین استایل خوش آمدید!\n` +
+      `کد تخفیف ${percent}٪ شما برای خرید اول: ${code}\n` +
+      `با هر خرید، پلهٔ تخفیف بعدی برایتان فعال می‌شود.\n` +
+      `دیواین استایل`
+    );
+  }
+
+  buildNextWelcomeStageText(code: string, percent: number): string {
+    return (
+      `🎉 تبریک! پلهٔ بعدی تخفیف شما فعال شد\n` +
+      `کد تخفیف ${percent}٪ برای خرید بعدی: ${code}\n` +
       `دیواین استایل`
     );
   }

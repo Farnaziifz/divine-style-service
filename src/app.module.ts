@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { OrderModule } from './modules/order/order.module';
+import { OfflineSaleModule } from './modules/offline-sale/offline-sale.module';
 import { ShoppingListModule } from './modules/shopping-list/shopping-list.module';
 import { DiscountModule } from './modules/discount/discount.module';
 import { PaymentModule } from './modules/payment/payment.module';
@@ -38,6 +39,7 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
     CatalogModule,
     UploadModule,
     OrderModule,
+    OfflineSaleModule,
     ShoppingListModule,
     DiscountModule,
     PaymentModule,

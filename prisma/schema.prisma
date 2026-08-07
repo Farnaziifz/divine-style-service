@@ -39,6 +39,7 @@ model User {
   wallet                    Wallet?
   directConversation        DirectConversation?
   directMessages            DirectMessage[]            @relation("DirectMessageAuthor")
+  offlineSales              OfflineSale[]
   createdAt                 DateTime                   @default(now())
   updatedAt                 DateTime                   @updatedAt
   isDeleted                 Boolean                    @default(false)
@@ -374,6 +375,7 @@ model Product {
   reviews                ProductReview[]
   shoppingListItems      ShoppingListItem[]
   orderItems             OrderItem[]
+  offlineSaleItems       OfflineSaleItem[]
   contentCalendarEntries ContentCalendarEntry[]
   contentPostedAt        DateTime? // اولین باری که این محصول توی شبکه‌های اجتماعی پست شد
 
@@ -434,8 +436,9 @@ model ProductVariant {
   // Variant specific specifications (e.g. Waist size for this size)
   specifications Json?
 
-  tempBasketItems TempBasketItem[]
-  orderItems      OrderItem[]
+  tempBasketItems  TempBasketItem[]
+  orderItems       OrderItem[]
+  offlineSaleItems OfflineSaleItem[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -658,6 +661,53 @@ model OrderItem {
   deletedAt         DateTime?
 
   @@index([orderId])
+  @@index([productId])
+  @@index([productVariantId])
+}
+
+// ----------------------
+// Offline / manual sales (Instagram, in-person, events)
+// ----------------------
+
+model OfflineSale {
+  id                String            @id @default(uuid()) @db.Uuid
+  channel           String // متن آزاد: "اینستاگرام"، "ایونت تجریش"، "حضوری فروشگاه"...
+  commissionPercent Decimal?          @db.Decimal(5, 2) // درصد کمیسیون مکان فروش (اختیاری)
+  discountAmount    Decimal           @default(0) @db.Decimal(12, 2)
+  totalAmount       Decimal           @default(0) @db.Decimal(12, 2) // مجموع قبل از تخفیف
+  commissionAmount  Decimal           @default(0) @db.Decimal(12, 2)
+  payableAmount     Decimal           @default(0) @db.Decimal(12, 2) // بعد از تخفیف
+  netAmount         Decimal           @default(0) @db.Decimal(12, 2) // بعد از تخفیف و کمیسیون
+  costOfGoods       Decimal           @default(0) @db.Decimal(12, 2) // اسنپ‌شات بهای تمام‌شده
+  note              String?
+  soldAt            DateTime          @default(now())
+  createdByUserId   String?           @db.Uuid
+  createdByUser     User?             @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  items             OfflineSaleItem[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  isDeleted         Boolean           @default(false)
+  deletedAt         DateTime?
+
+  @@index([isDeleted, soldAt])
+}
+
+model OfflineSaleItem {
+  id               String         @id @default(uuid()) @db.Uuid
+  offlineSaleId    String         @db.Uuid
+  offlineSale      OfflineSale    @relation(fields: [offlineSaleId], references: [id], onDelete: Cascade)
+  productId        String         @db.Uuid
+  product          Product        @relation(fields: [productId], references: [id])
+  productVariantId String         @db.Uuid
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id])
+  sku              String
+  title            String
+  quantity         Int
+  unitPrice        Decimal        @db.Decimal(12, 2)
+  unitCostPrice    Decimal        @db.Decimal(12, 2) // اسنپ‌شات Product.costPrice در لحظه فروش
+  createdAt        DateTime       @default(now())
+
+  @@index([offlineSaleId])
   @@index([productId])
   @@index([productVariantId])
 }

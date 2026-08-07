@@ -11,6 +11,7 @@ import { RESERVATION_TTL_MS } from '../order/reservation.constants';
 import { SmsTextService } from '../shared/sms/sms-text.service';
 import { CashbackGrantService } from '../loyalty/cashback-incentive/cashback-grant.service';
 import { CouponTriggerService } from '../loyalty/coupon-incentive/coupon-trigger.service';
+import { DiscountService } from '../discount/discount.service';
 
 @ApiTags('Payment')
 @Controller('payments')
@@ -24,6 +25,7 @@ export class PaymentController {
     private readonly smsText: SmsTextService,
     private readonly cashbackGrant: CashbackGrantService,
     private readonly couponTrigger: CouponTriggerService,
+    private readonly discountService: DiscountService,
   ) {}
 
   /**
@@ -73,6 +75,32 @@ export class PaymentController {
   private async evaluateCouponTriggersForOrder(orderId: string): Promise<void> {
     try {
       await this.couponTrigger.onOrderCompleted(orderId);
+    } catch {
+      // swallow — see comment above.
+    }
+  }
+
+  /**
+   * اگر سفارش با یکی از کدهای پلکانی خوش‌آمدگویی پرداخت شده، پلهٔ بعدی را برای
+   * همان کاربر فعال و پیامک می‌کند. Best-effort — نباید روی کال‌بک پرداخت اثر بگذارد.
+   */
+  private async advanceWelcomeDiscountStage(
+    userId: string,
+    discountCode: string | null,
+    customerMobile: string | undefined,
+  ): Promise<void> {
+    if (!discountCode || !customerMobile) return;
+    try {
+      const stage = await this.discountService.activateNextWelcomeStage(
+        discountCode,
+        userId,
+      );
+      if (!stage) return;
+      const text = this.smsText.buildNextWelcomeStageText(
+        stage.code,
+        stage.value,
+      );
+      await this.smsText.send(customerMobile, text);
     } catch {
       // swallow — see comment above.
     }
@@ -394,7 +422,9 @@ export class PaymentController {
         redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
         paid: {
           orderId,
+          userId: current.order!.userId,
           customerMobile: current.order?.user?.mobile,
+          discountCode: current.order?.discountCode ?? null,
           orderCode,
           payableAmount: Math.round(Number(current.amount)),
         },
@@ -409,6 +439,11 @@ export class PaymentController {
       );
       void this.grantCashbackForOrder(callbackResult.paid.orderId);
       void this.evaluateCouponTriggersForOrder(callbackResult.paid.orderId);
+      void this.advanceWelcomeDiscountStage(
+        callbackResult.paid.userId,
+        callbackResult.paid.discountCode,
+        callbackResult.paid.customerMobile,
+      );
     }
 
     return res.redirect(callbackResult.redirect);
@@ -520,7 +555,9 @@ export class PaymentController {
         redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
         paid: {
           orderId: currentOrderId,
+          userId: current.order!.userId,
           customerMobile: current.order?.user?.mobile,
+          discountCode: current.order?.discountCode ?? null,
           orderCode,
           payableAmount: Math.round(Number(current.amount)),
         },
@@ -535,6 +572,11 @@ export class PaymentController {
       );
       void this.grantCashbackForOrder(callbackResult.paid.orderId);
       void this.evaluateCouponTriggersForOrder(callbackResult.paid.orderId);
+      void this.advanceWelcomeDiscountStage(
+        callbackResult.paid.userId,
+        callbackResult.paid.discountCode,
+        callbackResult.paid.customerMobile,
+      );
     }
 
     return res.redirect(callbackResult.redirect);
