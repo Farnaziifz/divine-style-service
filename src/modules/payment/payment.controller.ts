@@ -30,6 +30,9 @@ export class PaymentController {
   private readonly orderRegisteredTemplateId = Number(
     process.env.SMS_IR_ORDER_TEMPLATE_ID?.trim() || '852827',
   );
+  private readonly adminOrderNotificationTemplateId = Number(
+    process.env.SMS_IR_ADMIN_ORDER_TEMPLATE_ID?.trim() || '866043',
+  );
 
   constructor(
     private readonly prisma: PrismaService,
@@ -63,19 +66,27 @@ export class PaymentController {
     customerMobile: string | undefined,
     orderCode: string,
     payableAmount: number,
+    discountCode: string | null,
   ): Promise<void> {
     try {
       const recipients = await this.prisma.orderNotificationPhone.findMany({
         where: { isActive: true, isDeleted: false },
         select: { phoneNumber: true },
       });
-      const adminText = this.smsText.buildAdminOrderNotificationText(
-        customerMobile ?? '-',
-        orderCode,
-        payableAmount,
-      );
+      const adminParams = this.smsText.buildAdminOrderNotificationTemplateParams({
+        phone: customerMobile ?? '-',
+        orderNumber: orderCode,
+        price: payableAmount.toLocaleString('fa-IR'),
+        code: discountCode ?? '-',
+      });
       await Promise.all(
-        recipients.map((r) => this.smsText.send(r.phoneNumber, adminText)),
+        recipients.map((r) =>
+          this.smsText.sendTemplateMessage(
+            r.phoneNumber,
+            this.adminOrderNotificationTemplateId,
+            adminParams,
+          ),
+        ),
       );
 
       if (customerMobile) {
@@ -486,6 +497,7 @@ export class PaymentController {
         callbackResult.paid.customerMobile,
         callbackResult.paid.orderCode,
         callbackResult.paid.payableAmount,
+        callbackResult.paid.discountCode,
       );
       void this.grantCashbackForOrder(callbackResult.paid.orderId);
       void this.evaluateCouponTriggersForOrder(callbackResult.paid.orderId);
@@ -620,6 +632,7 @@ export class PaymentController {
         callbackResult.paid.customerMobile,
         callbackResult.paid.orderCode,
         callbackResult.paid.payableAmount,
+        callbackResult.paid.discountCode,
       );
       void this.grantCashbackForOrder(callbackResult.paid.orderId);
       void this.evaluateCouponTriggersForOrder(callbackResult.paid.orderId);

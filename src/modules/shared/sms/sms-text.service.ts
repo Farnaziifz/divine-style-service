@@ -53,29 +53,6 @@ export class SmsTextService {
     }
   }
 
-  buildAdminOrderNotificationText(
-    customerMobile: string,
-    orderCode: string,
-    payableAmount: number,
-  ): string {
-    return (
-      `🛍 سفارش جدید ثبت شد\n` +
-      `شماره تماس مشتری: ${customerMobile}\n` +
-      `شماره سفارش: ${orderCode}\n` +
-      `مبلغ سفارش: ${payableAmount.toLocaleString('fa-IR')} تومان\n` +
-      `دیواین استایل`
-    );
-  }
-
-  buildCustomerOrderRegisteredText(orderCode: string): string {
-    return (
-      `✅ سفارش شما با موفقیت ثبت شد\n` +
-      `شماره سفارش: ${orderCode}\n` +
-      `از خرید شما سپاسگزاریم 🌸\n` +
-      `دیواین استایل`
-    );
-  }
-
   private getVerifyConfig() {
     const apiKey = process.env.SMS_IR_API_KEY?.trim() || '';
     const verifyUrl = (
@@ -149,6 +126,20 @@ export class SmsTextService {
       { name: 'ORDER_NUMBER', value: params.orderNumber },
       { name: 'DATE', value: params.date },
       { name: 'PRICE', value: params.price },
+    ];
+  }
+
+  buildAdminOrderNotificationTemplateParams(params: {
+    phone: string;
+    orderNumber: string;
+    price: string;
+    code: string;
+  }): Array<{ name: string; value: string }> {
+    return [
+      { name: 'PHONE', value: params.phone },
+      { name: 'ORDER_NUMBER', value: params.orderNumber },
+      { name: 'PRICE', value: params.price },
+      { name: 'CODE', value: params.code },
     ];
   }
 
