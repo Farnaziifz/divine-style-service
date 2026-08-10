@@ -1,8 +1,17 @@
-import { Controller, Get, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Logger,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
 import { Prisma } from '@prisma/client';
+import { toJalaali } from 'jalaali-js';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { PaginationDto } from '../shared/dtos/pagination.dto';
 import { PaymentService } from './payment.service';
@@ -16,7 +25,11 @@ import { DiscountService } from '../discount/discount.service';
 @ApiTags('Payment')
 @Controller('payments')
 export class PaymentController {
+  private readonly logger = new Logger(PaymentController.name);
   private readonly providerOptions = ['ZARINPAL', 'ZIBAL'] as const;
+  private readonly orderRegisteredTemplateId = Number(
+    process.env.SMS_IR_ORDER_TEMPLATE_ID?.trim() || '852827',
+  );
 
   constructor(
     private readonly prisma: PrismaService,
@@ -28,12 +41,25 @@ export class PaymentController {
     private readonly discountService: DiscountService,
   ) {}
 
+  private formatOrderDateJalali(date: Date): string {
+    const { jy, jm, jd } = toJalaali(date);
+    return `${jy}/${String(jm).padStart(2, '0')}/${String(jd).padStart(2, '0')}`;
+  }
+
+  private formatOrderItemsTitle(titles: string[]): string {
+    const maxItems = 3;
+    const shown = titles.slice(0, maxItems).join('، ');
+    const rest = titles.length - maxItems;
+    return rest > 0 ? `${shown} و ${rest} مورد دیگر` : shown;
+  }
+
   /**
    * Fired only once a payment actually clears — not at checkout/order
    * creation, so a user who abandons the gateway never gets a "order
    * registered" SMS for an order that was never paid for.
    */
   private async notifyOrderPaid(
+    orderId: string,
     customerMobile: string | undefined,
     orderCode: string,
     payableAmount: number,
@@ -53,9 +79,30 @@ export class PaymentController {
       );
 
       if (customerMobile) {
-        const customerText =
-          this.smsText.buildCustomerOrderRegisteredText(orderCode);
-        await this.smsText.send(customerMobile, customerText);
+        const order = await this.prisma.order.findUnique({
+          where: { id: orderId },
+          select: {
+            paidAt: true,
+            createdAt: true,
+            items: {
+              where: { isDeleted: false },
+              select: { title: true },
+            },
+          },
+        });
+        const itemTitles = order?.items.map((i) => i.title) ?? [];
+        const orderDate = order?.paidAt ?? order?.createdAt ?? new Date();
+
+        await this.smsText.sendTemplateMessage(
+          customerMobile,
+          this.orderRegisteredTemplateId,
+          this.smsText.buildOrderRegisteredTemplateParams({
+            title: this.formatOrderItemsTitle(itemTitles),
+            orderNumber: orderCode,
+            date: this.formatOrderDateJalali(orderDate),
+            price: `${payableAmount.toLocaleString('fa-IR')} تومان`,
+          }),
+        );
       }
     } catch {
       // Notification failure must never affect the payment callback flow.
@@ -101,8 +148,10 @@ export class PaymentController {
         stage.value,
       );
       await this.smsText.send(customerMobile, text);
-    } catch {
-      // swallow — see comment above.
+    } catch (err) {
+      this.logger.error(
+        `Welcome discount stage advance failed for user ${userId}: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -433,6 +482,7 @@ export class PaymentController {
 
     if (callbackResult.paid) {
       void this.notifyOrderPaid(
+        callbackResult.paid.orderId,
         callbackResult.paid.customerMobile,
         callbackResult.paid.orderCode,
         callbackResult.paid.payableAmount,
@@ -566,6 +616,7 @@ export class PaymentController {
 
     if (callbackResult.paid) {
       void this.notifyOrderPaid(
+        callbackResult.paid.orderId,
         callbackResult.paid.customerMobile,
         callbackResult.paid.orderCode,
         callbackResult.paid.payableAmount,

@@ -786,6 +786,8 @@ model Incentive {
 enum IncentiveTierType {
   FLAT
   STEPPED
+  /// پلکانی بر اساس امین بار استفادهٔ همان مشتری از این کد (نه مبلغ سفارش) — کد ۳ باره ۱۰٪/۱۵٪/۲۰٪
+  USAGE_STEPPED
 }
 
 enum IncentiveUsageType {
@@ -808,12 +810,16 @@ model DiscountCodeDetail {
   tiers             DiscountCodeTier[]
 }
 
-/// یک پلهٔ تخفیف پلکانی — بالاترین پله‌ای که minAmount آن <= مبلغ سفارش باشد اعمال می‌شود (flat-at-tier)
+/// یک پلهٔ تخفیف پلکانی. برای tierType=STEPPED با minAmount (بالاترین پله‌ای که
+/// minAmount آن <= مبلغ سفارش باشد اعمال می‌شود). برای tierType=USAGE_STEPPED با
+/// usageIndex (امین بار استفادهٔ مشتری از کد — ۱=اولین بار).
 model DiscountCodeTier {
   id                   String             @id @default(uuid()) @db.Uuid
   discountCodeDetailId String             @db.Uuid
   discountCodeDetail   DiscountCodeDetail @relation(fields: [discountCodeDetailId], references: [incentiveId], onDelete: Cascade)
-  minAmount            Decimal            @db.Decimal(12, 2)
+  minAmount            Decimal?           @db.Decimal(12, 2)
+  /// وقتی tierType = USAGE_STEPPED — امین بار استفادهٔ مشتری (۱، ۲، ۳، ...)
+  usageIndex           Int?
   /// درصد یا مبلغ ثابت، بسته به valueType والد (DiscountCodeDetail.valueType)
   value                Decimal            @db.Decimal(12, 2)
 

@@ -50,7 +50,10 @@ export class DiscountIncentiveService {
   private assertTierRules(
     tierType: IncentiveTierType,
     valueType: IncentiveValueType,
-    tiers: { minAmount: number; value: number }[] | undefined,
+    tiers:
+      | { minAmount?: number; usageIndex?: number; value: number }[]
+      | undefined,
+    usageType?: IncentiveUsageType,
   ) {
     if (tierType === IncentiveTierType.STEPPED) {
       if (!tiers || tiers.length === 0) {
@@ -60,10 +63,39 @@ export class DiscountIncentiveService {
       }
       const seen = new Set<number>();
       for (const tier of tiers) {
+        if (tier.minAmount == null) {
+          throw new BadRequestException(
+            'برای tierType=STEPPED باید minAmount هر پله مشخص باشد',
+          );
+        }
         if (seen.has(tier.minAmount)) {
           throw new BadRequestException('حداقل مبلغ پله‌ها نباید تکراری باشد');
         }
         seen.add(tier.minAmount);
+        this.assertValueRules(valueType, tier.value, 'مقدار پله');
+      }
+    } else if (tierType === IncentiveTierType.USAGE_STEPPED) {
+      if (!tiers || tiers.length === 0) {
+        throw new BadRequestException(
+          'برای tierType=USAGE_STEPPED حداقل یک پله لازم است',
+        );
+      }
+      if (usageType !== IncentiveUsageType.MULTI_USE) {
+        throw new BadRequestException(
+          'برای tierType=USAGE_STEPPED باید usageType=MULTI_USE باشد',
+        );
+      }
+      const indexes = tiers
+        .map((t) => t.usageIndex)
+        .sort((a, b) => (a ?? 0) - (b ?? 0));
+      const expected = tiers.map((_, i) => i + 1);
+      const isSequential = indexes.every((v, i) => v === expected[i]);
+      if (!isSequential) {
+        throw new BadRequestException(
+          'پله‌های USAGE_STEPPED باید پیوسته از ۱ شروع شوند (مثلاً ۱، ۲، ۳)',
+        );
+      }
+      for (const tier of tiers) {
         this.assertValueRules(valueType, tier.value, 'مقدار پله');
       }
     } else if (tiers && tiers.length > 0) {
@@ -102,12 +134,20 @@ export class DiscountIncentiveService {
             usageType: discountCodeDetail.usageType,
             minPurchaseAmount:
               discountCodeDetail.minPurchaseAmount?.toNumber() ?? null,
-            tiers: discountCodeDetail.tiers
-              .map((t) => ({
-                minAmount: t.minAmount.toNumber(),
-                value: t.value.toNumber(),
-              }))
-              .sort((a, b) => a.minAmount - b.minAmount),
+            tiers:
+              discountCodeDetail.tierType === IncentiveTierType.USAGE_STEPPED
+                ? discountCodeDetail.tiers
+                    .map((t) => ({
+                      usageIndex: t.usageIndex,
+                      value: t.value.toNumber(),
+                    }))
+                    .sort((a, b) => (a.usageIndex ?? 0) - (b.usageIndex ?? 0))
+                : discountCodeDetail.tiers
+                    .map((t) => ({
+                      minAmount: t.minAmount?.toNumber() ?? 0,
+                      value: t.value.toNumber(),
+                    }))
+                    .sort((a, b) => a.minAmount - b.minAmount),
           }
         : null,
     };
@@ -120,7 +160,7 @@ export class DiscountIncentiveService {
     const usageType = dto.usageType ?? IncentiveUsageType.SINGLE_USE;
 
     this.assertValueRules(valueType, dto.value);
-    this.assertTierRules(tierType, valueType, dto.tiers);
+    this.assertTierRules(tierType, valueType, dto.tiers, usageType);
 
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(dto.endsAt);
@@ -154,17 +194,23 @@ export class DiscountIncentiveService {
               dto.minPurchaseAmount != null
                 ? new Prisma.Decimal(dto.minPurchaseAmount)
                 : null,
-            tiers:
-              tierType === IncentiveTierType.STEPPED && dto.tiers?.length
-                ? {
-                    createMany: {
-                      data: dto.tiers.map((t) => ({
-                        minAmount: new Prisma.Decimal(t.minAmount),
-                        value: new Prisma.Decimal(t.value),
-                      })),
-                    },
-                  }
-                : undefined,
+            tiers: dto.tiers?.length
+              ? {
+                  createMany: {
+                    data: dto.tiers.map((t) =>
+                      tierType === IncentiveTierType.USAGE_STEPPED
+                        ? {
+                            usageIndex: t.usageIndex,
+                            value: new Prisma.Decimal(t.value),
+                          }
+                        : {
+                            minAmount: new Prisma.Decimal(t.minAmount!),
+                            value: new Prisma.Decimal(t.value),
+                          },
+                    ),
+                  },
+                }
+              : undefined,
           },
         },
       },
@@ -245,14 +291,19 @@ export class DiscountIncentiveService {
       dto.tiers !== undefined
         ? dto.tiers
         : detail.tiers.map((t) => ({
-            minAmount: t.minAmount.toNumber(),
+            minAmount: t.minAmount?.toNumber(),
+            usageIndex: t.usageIndex ?? undefined,
             value: t.value.toNumber(),
           }));
     if (dto.tiers !== undefined || dto.tierType !== undefined) {
       this.assertTierRules(
         tierType,
         valueType,
-        tierType === IncentiveTierType.STEPPED ? nextTiers : undefined,
+        tierType === IncentiveTierType.STEPPED ||
+          tierType === IncentiveTierType.USAGE_STEPPED
+          ? nextTiers
+          : undefined,
+        usageType,
       );
     }
 
@@ -320,13 +371,25 @@ export class DiscountIncentiveService {
         await tx.discountCodeTier.deleteMany({
           where: { discountCodeDetailId: id },
         });
-        if (tierType === IncentiveTierType.STEPPED && nextTiers.length) {
+        if (
+          (tierType === IncentiveTierType.STEPPED ||
+            tierType === IncentiveTierType.USAGE_STEPPED) &&
+          nextTiers.length
+        ) {
           await tx.discountCodeTier.createMany({
-            data: nextTiers.map((t) => ({
-              discountCodeDetailId: id,
-              minAmount: new Prisma.Decimal(t.minAmount),
-              value: new Prisma.Decimal(t.value),
-            })),
+            data: nextTiers.map((t) =>
+              tierType === IncentiveTierType.USAGE_STEPPED
+                ? {
+                    discountCodeDetailId: id,
+                    usageIndex: t.usageIndex,
+                    value: new Prisma.Decimal(t.value),
+                  }
+                : {
+                    discountCodeDetailId: id,
+                    minAmount: new Prisma.Decimal(t.minAmount!),
+                    value: new Prisma.Decimal(t.value),
+                  },
+            ),
           });
         }
       }

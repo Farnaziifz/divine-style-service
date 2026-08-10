@@ -76,6 +76,82 @@ export class SmsTextService {
     );
   }
 
+  private getVerifyConfig() {
+    const apiKey = process.env.SMS_IR_API_KEY?.trim() || '';
+    const verifyUrl = (
+      process.env.SMS_IR_VERIFY_URL?.trim() || 'https://api.sms.ir/v1/send/verify'
+    )
+      .trim()
+      .replace(/^['"`\s]+/, '')
+      .replace(/['"`\s]+$/, '');
+    const logOnly =
+      (process.env.SMS_LOG_OTP_ONLY || 'false').toLowerCase() === 'true';
+    return { apiKey, verifyUrl, logOnly };
+  }
+
+  /**
+   * ارسال با کد الگو (همان API/خط رسمی OTP) — برخلاف send()، نیازی به
+   * لاین تبلیغاتی ندارد و مشمول محدودیت ارسال تبلیغاتی نمی‌شود.
+   */
+  async sendTemplateMessage(
+    mobile: string,
+    templateId: number,
+    parameters: Array<{ name: string; value: string }>,
+  ): Promise<void> {
+    const { apiKey, verifyUrl, logOnly } = this.getVerifyConfig();
+
+    if (logOnly) {
+      this.logger.log(
+        `SMS template (log only) to ${mobile}: template=${templateId} ${JSON.stringify(parameters)}`,
+      );
+      return;
+    }
+
+    if (!apiKey) {
+      this.logger.warn(
+        `SMS template not sent to ${mobile}: تنظیمات پیامک کامل نیست (SMS_IR_API_KEY)`,
+      );
+      return;
+    }
+
+    try {
+      const res = await fetch(verifyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/plain, */*',
+          'x-api-key': apiKey,
+        },
+        body: JSON.stringify({ mobile, templateId, parameters }),
+      });
+
+      const body = await res.json().catch(() => null);
+      if (!res.ok || Number(body?.status) !== 1) {
+        this.logger.warn(
+          `SMS template failed to ${mobile}: ${JSON.stringify(body)}`,
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        `SMS template error to ${mobile}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  buildOrderRegisteredTemplateParams(params: {
+    title: string;
+    orderNumber: string;
+    date: string;
+    price: string;
+  }): Array<{ name: string; value: string }> {
+    return [
+      { name: 'TITLE', value: params.title },
+      { name: 'ORDER_NUMBER', value: params.orderNumber },
+      { name: 'DATE', value: params.date },
+      { name: 'PRICE', value: params.price },
+    ];
+  }
+
   buildWelcomeDiscountText(code: string, percent: number): string {
     return (
       `🎁 به دیواین استایل خوش آمدید!\n` +

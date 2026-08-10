@@ -111,6 +111,28 @@ describe('validateRedemption', () => {
     });
     expect(result).toEqual({ valid: true });
   });
+
+  it('allows a usage-stepped code while under the tier count', () => {
+    const result = validateRedemption({
+      ...baseInput,
+      usageType: IncentiveUsageType.MULTI_USE,
+      tierType: IncentiveTierType.USAGE_STEPPED,
+      usageCount: 1,
+      tierCount: 3,
+    });
+    expect(result).toEqual({ valid: true });
+  });
+
+  it('rejects a usage-stepped code once the tier count is reached', () => {
+    const result = validateRedemption({
+      ...baseInput,
+      usageType: IncentiveUsageType.MULTI_USE,
+      tierType: IncentiveTierType.USAGE_STEPPED,
+      usageCount: 3,
+      tierCount: 3,
+    });
+    expect(result).toEqual({ valid: false, reason: 'USAGE_LIMIT_REACHED' });
+  });
 });
 
 describe('calculateDiscountAmount', () => {
@@ -185,6 +207,55 @@ describe('calculateDiscountAmount', () => {
       value: 0,
       tiers: [{ minAmount: 500_000, value: 10 }],
       orderAmount: 100_000,
+    });
+    expect(amount).toBe(0);
+  });
+
+  it('applies the first-use tier for a usage-stepped code (10/15/20)', () => {
+    const tiers = [
+      { usageIndex: 1, value: 10 },
+      { usageIndex: 2, value: 15 },
+      { usageIndex: 3, value: 20 },
+    ];
+    const first = calculateDiscountAmount({
+      valueType: IncentiveValueType.PERCENTAGE,
+      tierType: IncentiveTierType.USAGE_STEPPED,
+      value: 0,
+      tiers,
+      orderAmount: 1_000_000,
+      usageCount: 0,
+    });
+    expect(first).toBe(100_000);
+
+    const second = calculateDiscountAmount({
+      valueType: IncentiveValueType.PERCENTAGE,
+      tierType: IncentiveTierType.USAGE_STEPPED,
+      value: 0,
+      tiers,
+      orderAmount: 1_000_000,
+      usageCount: 1,
+    });
+    expect(second).toBe(150_000);
+
+    const third = calculateDiscountAmount({
+      valueType: IncentiveValueType.PERCENTAGE,
+      tierType: IncentiveTierType.USAGE_STEPPED,
+      value: 0,
+      tiers,
+      orderAmount: 1_000_000,
+      usageCount: 2,
+    });
+    expect(third).toBe(200_000);
+  });
+
+  it('returns zero for a usage-stepped code past its last tier', () => {
+    const amount = calculateDiscountAmount({
+      valueType: IncentiveValueType.PERCENTAGE,
+      tierType: IncentiveTierType.USAGE_STEPPED,
+      value: 0,
+      tiers: [{ usageIndex: 1, value: 10 }],
+      orderAmount: 1_000_000,
+      usageCount: 1,
     });
     expect(amount).toBe(0);
   });

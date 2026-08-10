@@ -45,6 +45,20 @@ export class DiscountIncentiveController {
     }
   }
 
+  /** ریدیم فقط برای خود مشتری، یا برای هر مشتری توسط ادمین/اپراتور مجاز */
+  private assertCanRedeem(req: any, customerId: string) {
+    const isSelf = req.user?.id === customerId;
+    if (isSelf) return;
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isOperatorWithPermission =
+      req.user?.role === 'OPERATOR' &&
+      Array.isArray(req.user?.permissions) &&
+      req.user.permissions.includes('LOYALTY_CLUB_MANAGE');
+    if (!isAdmin && !isOperatorWithPermission) {
+      throw new ForbiddenException();
+    }
+  }
+
   @Post()
   @ApiOperation({ summary: 'ایجاد تخفیف نوع کد تخفیف (Incentive)' })
   create(@Req() req: any, @Body() dto: CreateDiscountIncentiveDto) {
@@ -61,7 +75,8 @@ export class DiscountIncentiveController {
 
   @Post('redeem')
   @ApiOperation({ summary: 'اعتبارسنجی و ریدیم کد تخفیف برای یک مشتری' })
-  redeem(@Body() dto: RedeemDiscountCodeDto) {
+  redeem(@Req() req: any, @Body() dto: RedeemDiscountCodeDto) {
+    this.assertCanRedeem(req, dto.customerId);
     return this.discountRedemptionService.redeem(dto);
   }
 

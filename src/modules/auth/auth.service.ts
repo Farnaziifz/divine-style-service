@@ -39,14 +39,21 @@ export class AuthService {
     try {
       const stage =
         await this.discountService.createWelcomeStagesForUser(userId);
-      if (!stage) return;
+      if (!stage) {
+        this.logger.warn(
+          `Welcome discount: no code generated for user ${userId} (collision after retries)`,
+        );
+        return;
+      }
       const text = this.smsText.buildWelcomeDiscountText(
         stage.code,
         stage.value,
       );
       await this.smsText.send(mobile, text);
-    } catch {
-      // swallow — see comment above.
+    } catch (err) {
+      this.logger.error(
+        `Welcome discount failed for user ${userId}: ${(err as Error).message}`,
+      );
     }
   }
 

@@ -59,10 +59,14 @@ export class CreateDiscountIncentiveDto {
   tierType?: IncentiveTierType;
 
   @ApiPropertyOptional({
-    description: 'الزامی وقتی tierType = STEPPED',
+    description: 'الزامی وقتی tierType = STEPPED یا USAGE_STEPPED',
     type: [DiscountCodeTierDto],
   })
-  @ValidateIf((o) => o.tierType === IncentiveTierType.STEPPED)
+  @ValidateIf(
+    (o) =>
+      o.tierType === IncentiveTierType.STEPPED ||
+      o.tierType === IncentiveTierType.USAGE_STEPPED,
+  )
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
