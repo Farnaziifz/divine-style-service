@@ -419,6 +419,98 @@ export class AdminSalesReportController {
     };
   }
 
+  @Get('detail')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'ریز فروش (سفارش به سفارش) با جستجوی مشتری/شماره سفارش' })
+  async detail(
+    @Req() req: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('search') search?: string,
+    @Query('page') pageParam?: string,
+    @Query('pageSize') pageSizeParam?: string,
+  ) {
+    this.assertCanView(req);
+    const { start, end } = this.getRange(from, to);
+    const page = Math.max(Number(pageParam) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(pageSizeParam) || 20, 1), 100);
+    const q = (search ?? '').trim();
+
+    const where: Prisma.OrderWhereInput = {
+      isDeleted: false,
+      paymentStatus: 'PAID',
+      paidAt: { gte: start, lte: end },
+      ...(q
+        ? {
+            OR: [
+              { orderCode: { contains: q, mode: 'insensitive' } },
+              { user: { is: { name: { contains: q, mode: 'insensitive' } } } },
+              { user: { is: { lastName: { contains: q, mode: 'insensitive' } } } },
+              { user: { is: { mobile: { contains: q, mode: 'insensitive' } } } },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, orders, packagingCost] = await Promise.all([
+      this.prisma.order.count({ where }),
+      this.prisma.order.findMany({
+        where,
+        orderBy: { paidAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          user: { select: { name: true, lastName: true, mobile: true } },
+          items: {
+            where: { isDeleted: false },
+            include: { product: { select: { costPrice: true } } },
+          },
+        },
+      }),
+      this.getPackagingCost(),
+    ]);
+
+    const data = orders.map((o) => {
+      const quantity = o.items.reduce((sum, it) => sum + it.quantity, 0);
+      const costOfGoods = o.items.reduce(
+        (sum, it) => sum + it.quantity * Number(it.product.costPrice),
+        0,
+      );
+      const netProfit = this.computeNetProfit({
+        payableAmount: Number(o.payableAmount),
+        shippingCost: Number(o.shippingCost),
+        costOfGoods,
+        quantity,
+        packagingCost,
+      });
+      return {
+        orderId: o.id,
+        orderCode: o.orderCode,
+        paidAt: o.paidAt,
+        customerName: [o.user?.name, o.user?.lastName].filter(Boolean).join(' ') || null,
+        customerMobile: o.user?.mobile ?? null,
+        products: o.items.map((it) => `${it.title} × ${it.quantity}`).join('، '),
+        quantity,
+        totalAmount: this.money(o.totalAmount),
+        discountAmount: this.money(o.discountAmount),
+        shippingCost: this.money(o.shippingCost),
+        payableAmount: this.money(o.payableAmount),
+        costOfGoods: this.money(costOfGoods),
+        packagingCost: this.money(packagingCost * quantity),
+        netProfit: this.money(netProfit),
+      };
+    });
+
+    return {
+      range: { from: start.toISOString(), to: end.toISOString() },
+      page,
+      pageSize,
+      total,
+      data,
+    };
+  }
+
   @Get('top-products')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
