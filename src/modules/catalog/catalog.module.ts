@@ -109,5 +109,6 @@ import { GetSpecificationKeysHandler } from './application/queries/handlers/get-
     DeleteSpecificationKeyHandler,
     GetSpecificationKeysHandler,
   ],
+  exports: [PricingService],
 })
 export class CatalogModule {}

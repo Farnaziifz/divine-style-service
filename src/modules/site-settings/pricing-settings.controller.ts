@@ -10,12 +10,16 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { PrismaService } from '../shared/prisma/prisma.service';
+import { PricingService } from '../catalog/application/services/pricing.service';
 import { UpdatePricingSettingsDto } from './dtos/update-pricing-settings.dto';
 
 @ApiTags('Site settings')
 @Controller('site-settings')
 export class PricingSettingsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pricingService: PricingService,
+  ) {}
 
   private assertCanManage(req: any) {
     const isAdmin = req.user?.role === 'ADMIN';
@@ -71,6 +75,15 @@ export class PricingSettingsController {
       }),
     ]);
 
-    return { packagingCost: dto.packagingCost, taxPercent: dto.taxPercent };
+    const updatedProductsCount = await this.pricingService.recalculateAllProductPrices(
+      dto.packagingCost,
+      dto.taxPercent,
+    );
+
+    return {
+      packagingCost: dto.packagingCost,
+      taxPercent: dto.taxPercent,
+      updatedProductsCount,
+    };
   }
 }

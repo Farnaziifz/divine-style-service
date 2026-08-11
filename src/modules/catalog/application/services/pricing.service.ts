@@ -9,6 +9,16 @@ export class PricingService {
    * finalPrice = (costPrice + packagingCost) × profitMultiplier، سپس مالیات روی نتیجه اعمال می‌شود.
    * packagingCost و taxPercent تنظیمات سراسری سایت هستند (SiteSetting)، profitMultiplier مخصوص دسته‌بندی است.
    */
+  calculateFinalPrice(
+    costPrice: number,
+    profitMultiplier: number,
+    packagingCost: number,
+    taxPercent: number,
+  ): number {
+    const base = (costPrice + packagingCost) * profitMultiplier;
+    return Math.round(base * (1 + taxPercent / 100));
+  }
+
   async computeFinalPrice(
     costPrice: number,
     profitMultiplier: number,
@@ -27,7 +37,46 @@ export class PricingService {
     const packagingCost = Number(packaging?.value) || 0;
     const taxPercent = Number(tax?.value) || 0;
 
-    const base = (costPrice + packagingCost) * profitMultiplier;
-    return Math.round(base * (1 + taxPercent / 100));
+    return this.calculateFinalPrice(
+      costPrice,
+      profitMultiplier,
+      packagingCost,
+      taxPercent,
+    );
+  }
+
+  /** بعد از تغییر PACKAGING_COST یا TAX_PERCENT، قیمت نهایی همهٔ محصولات را با مقادیر جدید دوباره محاسبه می‌کند. */
+  async recalculateAllProductPrices(
+    packagingCost: number,
+    taxPercent: number,
+  ): Promise<number> {
+    const products = await this.prisma.product.findMany({
+      where: { isDeleted: false },
+      select: {
+        id: true,
+        costPrice: true,
+        category: { select: { profitMultiplier: true } },
+      },
+    });
+
+    if (products.length === 0) return 0;
+
+    await this.prisma.$transaction(
+      products.map((p) =>
+        this.prisma.product.update({
+          where: { id: p.id },
+          data: {
+            finalPrice: this.calculateFinalPrice(
+              Number(p.costPrice),
+              Number(p.category.profitMultiplier),
+              packagingCost,
+              taxPercent,
+            ),
+          },
+        }),
+      ),
+    );
+
+    return products.length;
   }
 }
