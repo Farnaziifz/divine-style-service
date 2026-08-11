@@ -8,6 +8,7 @@ export class PricingService {
   /**
    * finalPrice = (costPrice + packagingCost) × profitMultiplier، سپس مالیات روی نتیجه اعمال می‌شود.
    * packagingCost و taxPercent تنظیمات سراسری سایت هستند (SiteSetting)، profitMultiplier مخصوص دسته‌بندی است.
+   * نتیجه به پایین رند می‌شود به نزدیک‌ترین هزار تومان (مثلاً ۲۹۷,۱۹۳ → ۲۹۷,۰۰۰).
    */
   calculateFinalPrice(
     costPrice: number,
@@ -16,7 +17,8 @@ export class PricingService {
     taxPercent: number,
   ): number {
     const base = (costPrice + packagingCost) * profitMultiplier;
-    return Math.round(base * (1 + taxPercent / 100));
+    const raw = base * (1 + taxPercent / 100);
+    return Math.floor(raw / 1000) * 1000;
   }
 
   async computeFinalPrice(
