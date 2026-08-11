@@ -1,9 +1,30 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 
 @Injectable()
 export class PricingService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async getPricingSettings(): Promise<{
+    packagingCost: number;
+    taxPercent: number;
+  }> {
+    const [packaging, tax] = await this.prisma.$transaction([
+      this.prisma.siteSetting.findUnique({
+        where: { key: 'PACKAGING_COST' },
+        select: { value: true },
+      }),
+      this.prisma.siteSetting.findUnique({
+        where: { key: 'TAX_PERCENT' },
+        select: { value: true },
+      }),
+    ]);
+    return {
+      packagingCost: Number(packaging?.value) || 0,
+      taxPercent: Number(tax?.value) || 0,
+    };
+  }
 
   /**
    * finalPrice = (costPrice + packagingCost) × profitMultiplier، سپس مالیات روی نتیجه اعمال می‌شود.
@@ -25,20 +46,7 @@ export class PricingService {
     costPrice: number,
     profitMultiplier: number,
   ): Promise<number> {
-    const [packaging, tax] = await this.prisma.$transaction([
-      this.prisma.siteSetting.findUnique({
-        where: { key: 'PACKAGING_COST' },
-        select: { value: true },
-      }),
-      this.prisma.siteSetting.findUnique({
-        where: { key: 'TAX_PERCENT' },
-        select: { value: true },
-      }),
-    ]);
-
-    const packagingCost = Number(packaging?.value) || 0;
-    const taxPercent = Number(tax?.value) || 0;
-
+    const { packagingCost, taxPercent } = await this.getPricingSettings();
     return this.calculateFinalPrice(
       costPrice,
       profitMultiplier,
@@ -47,13 +55,13 @@ export class PricingService {
     );
   }
 
-  /** بعد از تغییر PACKAGING_COST یا TAX_PERCENT، قیمت نهایی همهٔ محصولات را با مقادیر جدید دوباره محاسبه می‌کند. */
-  async recalculateAllProductPrices(
+  private async recalculateProductPrices(
+    where: Prisma.ProductWhereInput,
     packagingCost: number,
     taxPercent: number,
   ): Promise<number> {
     const products = await this.prisma.product.findMany({
-      where: { isDeleted: false },
+      where,
       select: {
         id: true,
         costPrice: true,
@@ -80,5 +88,30 @@ export class PricingService {
     );
 
     return products.length;
+  }
+
+  /** بعد از تغییر PACKAGING_COST یا TAX_PERCENT، قیمت نهایی همهٔ محصولات را با مقادیر جدید دوباره محاسبه می‌کند. */
+  async recalculateAllProductPrices(
+    packagingCost: number,
+    taxPercent: number,
+  ): Promise<number> {
+    return this.recalculateProductPrices(
+      { isDeleted: false },
+      packagingCost,
+      taxPercent,
+    );
+  }
+
+  /** دکمهٔ «به‌روزرسانی قیمت محصولات موجود» در لیست ادمین — فقط محصولاتی که حداقل یک واریانت با موجودی دارند. */
+  async recalculateInStockProductPrices(): Promise<number> {
+    const { packagingCost, taxPercent } = await this.getPricingSettings();
+    return this.recalculateProductPrices(
+      {
+        isDeleted: false,
+        variants: { some: { isDeleted: false, stock: { gt: 0 } } },
+      },
+      packagingCost,
+      taxPercent,
+    );
   }
 }

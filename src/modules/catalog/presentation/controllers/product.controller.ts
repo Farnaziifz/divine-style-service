@@ -26,6 +26,7 @@ import { GetProductsQuery } from '../../application/queries/get-products.query';
 import { GetProductQuery } from '../../application/queries/get-product.query';
 import { MinioService } from '../../../shared/minio/minio.service';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
+import { PricingService } from '../../application/services/pricing.service';
 
 @ApiTags('Products')
 @Controller('products')
@@ -36,6 +37,7 @@ export class ProductController {
     private readonly minioService: MinioService,
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly pricingService: PricingService,
   ) {}
 
   private assertCanWrite(req: any) {
@@ -112,6 +114,18 @@ export class ProductController {
         },
       },
     });
+  }
+
+  @Post('recalculate-prices')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'به‌روزرسانی قیمت محصولاتی که موجودی دارند بر اساس تنظیمات قیمت‌گذاری فعلی',
+  })
+  async recalculatePrices(@Req() req: any) {
+    this.assertCanWrite(req);
+    const updatedCount = await this.pricingService.recalculateInStockProductPrices();
+    return { updatedCount };
   }
 
   @Get(':id')
