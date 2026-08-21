@@ -22,6 +22,11 @@ import {
   calculateDiscountAmount,
   validateRedemption,
 } from '../../../loyalty/discount-incentive/discount-redemption.rules';
+import {
+  formatWelcomeTierLabel,
+  formatWelcomeTierMessage,
+  welcomeTierForPriorPaidCount,
+} from '../../../discount/welcome-tier.rules';
 import { UpsertBasketItemDto } from '../dtos/upsert-basket-item.dto';
 import { UpdateBasketItemDto } from '../dtos/update-basket-item.dto';
 import { BasketCheckoutPreviewDto } from '../dtos/basket-checkout-preview.dto';
@@ -209,6 +214,31 @@ export class BasketController {
     return {
       amountCents: toCents(discountAmountToman),
       incentiveId: detail.incentiveId,
+    };
+  }
+
+  /**
+   * وقتی مشتری کد تخفیفی وارد نکرده، تخفیف پلکانی خوش‌آمدگویی (خرید اول/دوم/سوم
+   * = ۱۰/۱۵/۲۰٪) را بر اساس تعداد سفارش‌های PAID قبلی او خودکار محاسبه می‌کند —
+   * بدون نیاز به هیچ کدی. برچسب برگشتی هم در order.discountCode ذخیره می‌شود
+   * (برای گزارش‌ها و پیامک ادمین) هم به فرانت برای نمایش پیام در چک‌اوت برمی‌گردد.
+   */
+  private async computeAutoWelcomeDiscount(
+    client: PrismaService | Prisma.TransactionClient,
+    userId: string,
+    subtotalCents: number,
+  ): Promise<{ amountCents: number; label: string; message: string } | null> {
+    const priorPaidCount = await client.order.count({
+      where: { userId, paymentStatus: 'PAID', isDeleted: false },
+    });
+    const tier = welcomeTierForPriorPaidCount(priorPaidCount);
+    if (!tier) return null;
+
+    const amountCents = Math.round((subtotalCents * tier.value) / 100);
+    return {
+      amountCents,
+      label: formatWelcomeTierLabel(tier),
+      message: formatWelcomeTierMessage(tier),
     };
   }
 
@@ -438,6 +468,8 @@ export class BasketController {
     const discountCodeRaw = dto.discountCode?.trim();
     const discountCode = discountCodeRaw ? discountCodeRaw.toUpperCase() : null;
     let discountAmountCents = 0;
+    let discountLabel: string | null = null;
+    let discountMessage: string | null = null;
 
     if (discountCode) {
       const discount = await this.prisma.discountCode.findFirst({
@@ -511,6 +543,17 @@ export class BasketController {
         }
         discountAmountCents = loyalty.amountCents;
       }
+    } else {
+      const auto = await this.computeAutoWelcomeDiscount(
+        this.prisma,
+        userId,
+        subtotalCents,
+      );
+      if (auto) {
+        discountAmountCents = auto.amountCents;
+        discountLabel = auto.label;
+        discountMessage = auto.message;
+      }
     }
 
     const payableCents =
@@ -518,7 +561,8 @@ export class BasketController {
 
     return {
       subtotal: fromCents(subtotalCents),
-      discountCode,
+      discountCode: discountCode ?? discountLabel,
+      discountMessage,
       discountAmount: fromCents(discountAmountCents),
       shippingCost: fromCents(shippingCostCents),
       payableAmount: fromCents(payableCents),
@@ -702,6 +746,7 @@ export class BasketController {
         : null;
       let discountAmountCents = 0;
       let loyaltyIncentiveId: string | null = null;
+      let discountLabel: string | null = null;
 
       if (discountCode) {
         const discount = await tx.discountCode.findFirst({
@@ -796,6 +841,16 @@ export class BasketController {
           discountAmountCents = loyalty.amountCents;
           loyaltyIncentiveId = loyalty.incentiveId;
         }
+      } else {
+        const auto = await this.computeAutoWelcomeDiscount(
+          tx,
+          userId,
+          subtotalCents,
+        );
+        if (auto) {
+          discountAmountCents = auto.amountCents;
+          discountLabel = auto.label;
+        }
       }
 
       const payableCents =
@@ -839,7 +894,7 @@ export class BasketController {
           orderCode,
           userId,
           totalAmount: fromCents(subtotalCents),
-          discountCode,
+          discountCode: discountCode ?? discountLabel,
           discountAmount: fromCents(discountAmountCents),
           shippingCost: fromCents(shippingCostCents),
           shippingMethodId,

@@ -113,6 +113,9 @@ export class OrderController {
               unitPrice: true,
               unitDiscountPrice: true,
               createdAt: true,
+              productVariant: {
+                select: { color: true, size: true },
+              },
             },
           },
           payments: {
@@ -163,6 +166,8 @@ export class OrderController {
           productVariantId: it.productVariantId,
           sku: it.sku,
           title: it.title,
+          color: it.productVariant?.color ?? null,
+          size: it.productVariant?.size ?? null,
           quantity: it.quantity,
           unitPrice: this.toNumber(it.unitPrice),
           unitDiscountPrice:
@@ -224,6 +229,8 @@ export class OrderController {
             productVariant: {
               select: {
                 images: true,
+                color: true,
+                size: true,
                 product: {
                   select: {
                     images: true,
@@ -297,6 +304,8 @@ export class OrderController {
         productVariantId: it.productVariantId,
         sku: it.sku,
         title: it.title,
+        color: it.productVariant?.color ?? null,
+        size: it.productVariant?.size ?? null,
         quantity: it.quantity,
         unitPrice: this.toNumber(it.unitPrice),
         unitDiscountPrice:

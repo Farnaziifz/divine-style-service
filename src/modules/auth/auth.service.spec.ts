@@ -3,7 +3,6 @@ import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { SmsTextService } from '../shared/sms/sms-text.service';
-import { DiscountService } from '../discount/discount.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -15,7 +14,6 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: {} },
         { provide: JwtService, useValue: {} },
         { provide: SmsTextService, useValue: {} },
-        { provide: DiscountService, useValue: {} },
       ],
     }).compile();
 

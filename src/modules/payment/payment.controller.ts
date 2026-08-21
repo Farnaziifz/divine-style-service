@@ -20,7 +20,7 @@ import { RESERVATION_TTL_MS } from '../order/reservation.constants';
 import { SmsTextService } from '../shared/sms/sms-text.service';
 import { CashbackGrantService } from '../loyalty/cashback-incentive/cashback-grant.service';
 import { CouponTriggerService } from '../loyalty/coupon-incentive/coupon-trigger.service';
-import { DiscountService } from '../discount/discount.service';
+import { welcomeTierForPriorPaidCount } from '../discount/welcome-tier.rules';
 
 @ApiTags('Payment')
 @Controller('payments')
@@ -41,7 +41,6 @@ export class PaymentController {
     private readonly smsText: SmsTextService,
     private readonly cashbackGrant: CashbackGrantService,
     private readonly couponTrigger: CouponTriggerService,
-    private readonly discountService: DiscountService,
   ) {}
 
   private formatOrderDateJalali(date: Date): string {
@@ -139,29 +138,31 @@ export class PaymentController {
   }
 
   /**
-   * اگر سفارش با یکی از کدهای پلکانی خوش‌آمدگویی پرداخت شده، پلهٔ بعدی را برای
-   * همان کاربر فعال و پیامک می‌کند. Best-effort — نباید روی کال‌بک پرداخت اثر بگذارد.
+   * تخفیف پلکانی خوش‌آمدگویی کاملاً خودکار است (بدون کد) — بر اساس تعداد
+   * سفارش‌های PAID مشتری در چک‌اوت محاسبه می‌شود (welcome-tier.rules.ts).
+   * اینجا فقط پس از پرداخت این سفارش، اگر هنوز پلهٔ بعدی باقی مانده، یک
+   * پیامک اطلاع‌رسانی (بدون کد) می‌فرستد. Best-effort — نباید روی کال‌بک
+   * پرداخت اثر بگذارد.
    */
-  private async advanceWelcomeDiscountStage(
+  private async notifyNextWelcomeTier(
     userId: string,
-    discountCode: string | null,
     customerMobile: string | undefined,
   ): Promise<void> {
-    if (!discountCode || !customerMobile) return;
+    if (!customerMobile) return;
     try {
-      const stage = await this.discountService.activateNextWelcomeStage(
-        discountCode,
-        userId,
-      );
-      if (!stage) return;
+      const paidCount = await this.prisma.order.count({
+        where: { userId, paymentStatus: 'PAID', isDeleted: false },
+      });
+      const nextTier = welcomeTierForPriorPaidCount(paidCount);
+      if (!nextTier) return;
       const text = this.smsText.buildNextWelcomeStageText(
-        stage.code,
-        stage.value,
+        nextTier.value,
+        nextTier.label,
       );
       await this.smsText.send(customerMobile, text);
     } catch (err) {
       this.logger.error(
-        `Welcome discount stage advance failed for user ${userId}: ${(err as Error).message}`,
+        `Welcome discount next-tier notice failed for user ${userId}: ${(err as Error).message}`,
       );
     }
   }
@@ -501,9 +502,8 @@ export class PaymentController {
       );
       void this.grantCashbackForOrder(callbackResult.paid.orderId);
       void this.evaluateCouponTriggersForOrder(callbackResult.paid.orderId);
-      void this.advanceWelcomeDiscountStage(
+      void this.notifyNextWelcomeTier(
         callbackResult.paid.userId,
-        callbackResult.paid.discountCode,
         callbackResult.paid.customerMobile,
       );
     }
@@ -636,9 +636,8 @@ export class PaymentController {
       );
       void this.grantCashbackForOrder(callbackResult.paid.orderId);
       void this.evaluateCouponTriggersForOrder(callbackResult.paid.orderId);
-      void this.advanceWelcomeDiscountStage(
+      void this.notifyNextWelcomeTier(
         callbackResult.paid.userId,
-        callbackResult.paid.discountCode,
         callbackResult.paid.customerMobile,
       );
     }

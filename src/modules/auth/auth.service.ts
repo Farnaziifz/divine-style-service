@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { SmsTextService } from '../shared/sms/sms-text.service';
-import { DiscountService } from '../discount/discount.service';
+import { WELCOME_TIERS } from '../discount/welcome-tier.rules';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as dns from 'node:dns';
@@ -28,31 +28,26 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private smsText: SmsTextService,
-    private discountService: DiscountService,
   ) {}
 
-  /** Best-effort — a welcome-discount failure must never block signup/login. */
+  /**
+   * Purely informational — the actual discount is computed and applied
+   * automatically at checkout from the customer's paid-order count
+   * (see welcome-tier.rules.ts), no code involved. Best-effort — a failure
+   * here must never block signup/login.
+   */
   private async issueWelcomeDiscount(
     userId: string,
     mobile: string,
   ): Promise<void> {
     try {
-      const stage =
-        await this.discountService.createWelcomeStagesForUser(userId);
-      if (!stage) {
-        this.logger.warn(
-          `Welcome discount: no code generated for user ${userId} (collision after retries)`,
-        );
-        return;
-      }
       const text = this.smsText.buildWelcomeDiscountText(
-        stage.code,
-        stage.value,
+        WELCOME_TIERS[0].value,
       );
       await this.smsText.send(mobile, text);
     } catch (err) {
       this.logger.error(
-        `Welcome discount failed for user ${userId}: ${(err as Error).message}`,
+        `Welcome discount SMS failed for user ${userId}: ${(err as Error).message}`,
       );
     }
   }

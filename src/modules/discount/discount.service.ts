@@ -16,18 +16,6 @@ import {
   Role,
 } from '@prisma/client';
 
-/**
- * پلکان‌های کد تخفیف خوش‌آمدگویی: خرید اول ۱۰٪، دوم ۱۵٪، سوم ۲۰٪.
- * هر کد فقط با کد پلهٔ قبلی از همان کاربر قابل تشخیص است (پیشوند + پسوند مشترک)
- * تا وقتی پلهٔ قبلی مصرف شد بتوانیم بدون اسکن، کد پلهٔ بعدی را پیدا و فعال کنیم.
- */
-const WELCOME_STAGES = [
-  { prefix: 'WLC1', value: 10, label: 'اول' },
-  { prefix: 'WLC2', value: 15, label: 'دوم' },
-  { prefix: 'WLC3', value: 20, label: 'سوم' },
-] as const;
-const WELCOME_VALIDITY_DAYS = 365;
-
 @Injectable()
 export class DiscountService {
   constructor(private readonly prisma: PrismaService) {}
@@ -562,90 +550,5 @@ export class DiscountService {
       data: { isDeleted: true, deletedAt: new Date(), isActive: false },
     });
     return { success: true };
-  }
-
-  /**
-   * برای کاربر تازه ثبت‌نام‌شده، سه کد تخفیف پلکانی (خرید اول/دوم/سوم) می‌سازد.
-   * فقط کد پلهٔ اول فعال است؛ پله‌های بعدی با مصرف پلهٔ قبلی توسط activateNextWelcomeStage فعال می‌شوند.
-   */
-  async createWelcomeStagesForUser(
-    userId: string,
-  ): Promise<{ code: string; value: number } | null> {
-    const suffix = `${userId.replace(/-/g, '').slice(0, 6).toUpperCase()}${Math.floor(
-      Math.random() * 10_000,
-    )
-      .toString()
-      .padStart(4, '0')}`;
-
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const codes = WELCOME_STAGES.map(
-        (s) => `${s.prefix}${suffix}${attempt || ''}`,
-      );
-      const clash = await this.prisma.discountCode.findFirst({
-        where: { code: { in: codes } },
-        select: { id: true },
-      });
-      if (clash) continue;
-
-      const validFrom = new Date();
-      const validTo = new Date(
-        validFrom.getTime() + WELCOME_VALIDITY_DAYS * 24 * 60 * 60 * 1000,
-      );
-
-      await this.prisma.discountCode.createMany({
-        data: WELCOME_STAGES.map((s, i) => ({
-          code: codes[i],
-          title: `کد خوش‌آمدگویی - خرید ${s.label}`,
-          scope: DiscountCodeScope.SINGLE_USER,
-          userId,
-          valueType: DiscountValueType.PERCENT,
-          value: new Prisma.Decimal(s.value),
-          validFrom,
-          validTo,
-          maxTotalUses: 1,
-          isActive: i === 0,
-        })),
-      });
-
-      return { code: codes[0], value: WELCOME_STAGES[0].value };
-    }
-
-    return null;
-  }
-
-  /**
-   * وقتی سفارشی با یکی از کدهای خوش‌آمدگویی پرداخت شد، پلهٔ بعدی همان کاربر را فعال می‌کند.
-   * برمی‌گرداند: کد و درصد پلهٔ تازه‌فعال‌شده، یا null اگر کد پلهٔ خوش‌آمدگویی نبود/پله آخر بود.
-   */
-  async activateNextWelcomeStage(
-    usedCode: string,
-    userId: string,
-  ): Promise<{ code: string; value: number } | null> {
-    const code = this.normalizeCode(usedCode);
-    const stageIndex = WELCOME_STAGES.findIndex((s) =>
-      code.startsWith(s.prefix),
-    );
-    if (stageIndex === -1 || stageIndex === WELCOME_STAGES.length - 1) {
-      return null;
-    }
-
-    const suffix = code.slice(WELCOME_STAGES[stageIndex].prefix.length);
-    const nextStage = WELCOME_STAGES[stageIndex + 1];
-    const nextCode = `${nextStage.prefix}${suffix}`;
-
-    const updated = await this.prisma.discountCode.updateMany({
-      where: {
-        code: nextCode,
-        userId,
-        isActive: false,
-        isDeleted: false,
-      },
-      data: { isActive: true },
-    });
-    if (updated.count === 0) {
-      return null;
-    }
-
-    return { code: nextCode, value: nextStage.value };
   }
 }

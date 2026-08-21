@@ -143,19 +143,19 @@ export class SmsTextService {
     ];
   }
 
-  buildWelcomeDiscountText(code: string, percent: number): string {
+  buildWelcomeDiscountText(percent: number): string {
     return (
       `🎁 به دیواین استایل خوش آمدید!\n` +
-      `کد تخفیف ${percent}٪ شما برای خرید اول: ${code}\n` +
+      `${percent}٪ تخفیف خرید اول شما به‌صورت خودکار در پرداخت اعمال می‌شود، نیازی به کد نیست.\n` +
       `با هر خرید، پلهٔ تخفیف بعدی برایتان فعال می‌شود.\n` +
       `دیواین استایل`
     );
   }
 
-  buildNextWelcomeStageText(code: string, percent: number): string {
+  buildNextWelcomeStageText(percent: number, label: string): string {
     return (
       `🎉 تبریک! پلهٔ بعدی تخفیف شما فعال شد\n` +
-      `کد تخفیف ${percent}٪ برای خرید بعدی: ${code}\n` +
+      `${percent}٪ تخفیف برای ${label} شما، بدون نیاز به کد، در پرداخت اعمال می‌شود.\n` +
       `دیواین استایل`
     );
   }
