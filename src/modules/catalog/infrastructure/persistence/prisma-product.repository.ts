@@ -100,6 +100,8 @@ export class PrismaProductRepository implements IProductRepository {
     const where: any = { isDeleted: false };
     if (!includeInactive) {
       where.isActive = true;
+      // موجودی هیچ واریانتی نداره -> برای مشتری نمایش داده نشه (فقط ادمین/اپراتور ببینه)
+      where.variants = { some: { isDeleted: false, stock: { gt: 0 } } };
     }
 
     if (filter?.search) {
@@ -174,6 +176,7 @@ export class PrismaProductRepository implements IProductRepository {
     const where: any = { id, isDeleted: false };
     if (!includeInactive) {
       where.isActive = true;
+      where.variants = { some: { isDeleted: false, stock: { gt: 0 } } };
     }
     const product = await this.prisma.product.findFirst({
       where,
