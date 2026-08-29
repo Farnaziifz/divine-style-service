@@ -3,7 +3,7 @@ import { UpdateProductCommand } from '../update-product.command';
 import { IProductRepository } from '../../../domain/repositories/product.repository.interface';
 import { ICategoryRepository } from '../../../domain/repositories/category.repository.interface';
 import { PricingService } from '../../services/pricing.service';
-import { Inject, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, NotFoundException } from '@nestjs/common';
 import slugify from 'slugify';
 
 @CommandHandler(UpdateProductCommand)
@@ -24,6 +24,21 @@ export class UpdateProductHandler implements ICommandHandler<UpdateProductComman
     }
 
     const slug = dto.title ? slugify(dto.title, { lower: true }) : product.slug;
+
+    // اگر بعد از این آپدیت محصول در رگال دسته‌بندی مقصد باشد (چه با فعال کردن showInRack
+    // چه با انتقال محصولِ از قبل رگال‌دار به دسته‌بندی دیگر)، سقف ۷ آیتم را چک کن
+    const nextCategoryId = dto.categoryId ?? product.categoryId;
+    const willBeOnRack = dto.showInRack !== undefined ? dto.showInRack : product.showInRack;
+    const categoryChanged = nextCategoryId !== product.categoryId;
+    const rackFlagEnabled = dto.showInRack === true && product.showInRack !== true;
+    if (willBeOnRack && (categoryChanged || rackFlagEnabled)) {
+      const rackCount = await this.repository.countRackItems(nextCategoryId, id);
+      if (rackCount >= 7) {
+        throw new BadRequestException(
+          'این دسته‌بندی از قبل ۷ محصول در رگال دارد؛ ابتدا یکی را از رگال خارج کنید.',
+        );
+      }
+    }
 
     const updateData: any = { ...dto, slug };
     if (images) {

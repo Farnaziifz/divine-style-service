@@ -21,4 +21,6 @@ export interface IProductRepository {
   findBySlug(slug: string, includeInactive?: boolean): Promise<Product | null>;
   update(id: string, data: any): Promise<Product>;
   remove(id: string): Promise<Product>;
+  /** تعداد محصولات فعال با showInRack=true در یک دسته‌بندی؛ برای اعمال سقف ۷ آیتم رگال */
+  countRackItems(categoryId: string, excludeProductId?: string): Promise<number>;
 }

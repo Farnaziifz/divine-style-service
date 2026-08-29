@@ -382,6 +382,7 @@ model Product {
   isActive    Boolean   @default(true)
   isFeatured  Boolean   @default(false) // محصول منتخب
   showInIntro Boolean   @default(false) // نمایش در اینترو
+  showInRack  Boolean   @default(false) // نمایش در رگال دسته‌بندی (حداکثر ۷ محصول به ازای هر دسته‌بندی)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   isDeleted   Boolean   @default(false)

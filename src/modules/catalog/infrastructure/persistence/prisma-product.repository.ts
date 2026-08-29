@@ -129,6 +129,10 @@ export class PrismaProductRepository implements IProductRepository {
       where.showInIntro = true;
     }
 
+    if (filter?.showInRack != null) {
+      where.showInRack = filter.showInRack;
+    }
+
     if (filter?.minPrice || filter?.maxPrice) {
       where.finalPrice = {
         gte: filter.minPrice,
@@ -312,6 +316,17 @@ export class PrismaProductRepository implements IProductRepository {
     return (
       updated ? this.attachVariantPricing(updated) : updated
     ) as unknown as Product;
+  }
+
+  async countRackItems(categoryId: string, excludeProductId?: string): Promise<number> {
+    return this.prisma.product.count({
+      where: {
+        categoryId,
+        showInRack: true,
+        isDeleted: false,
+        ...(excludeProductId ? { id: { not: excludeProductId } } : {}),
+      },
+    });
   }
 
   async remove(id: string): Promise<Product> {

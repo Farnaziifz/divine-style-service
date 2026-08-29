@@ -77,6 +77,12 @@ export class CreateProductDto {
   @IsBoolean()
   showInIntro?: boolean;
 
+  @ApiPropertyOptional({ description: 'نمایش در رگال دسته‌بندی (حداکثر ۷ محصول به ازای هر دسته‌بندی)' })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  showInRack?: boolean;
+
   @ApiProperty({ description: 'بهای تمام‌شدهٔ خالص (ورودی ادمین، برای محاسبهٔ قیمت نهایی)' })
   @IsNotEmpty()
   @Type(() => Number)

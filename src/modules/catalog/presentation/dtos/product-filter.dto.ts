@@ -53,4 +53,10 @@ export class ProductFilterDto extends PaginationDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   showInIntro?: boolean;
+
+  @ApiPropertyOptional({ description: 'نمایش در رگال دسته‌بندی' })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  showInRack?: boolean;
 }

@@ -4,7 +4,7 @@ import { IProductRepository } from '../../../domain/repositories/product.reposit
 import { ICategoryRepository } from '../../../domain/repositories/category.repository.interface';
 import { PricingService } from '../../services/pricing.service';
 import { ContentCalendarService } from '../../../../content-calendar/content-calendar.service';
-import { Inject, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Logger, NotFoundException } from '@nestjs/common';
 import slugify from 'slugify';
 
 @CommandHandler(CreateProductCommand)
@@ -25,6 +25,15 @@ export class CreateProductHandler implements ICommandHandler<CreateProductComman
     const category = await this.categoryRepository.findById(dto.categoryId);
     if (!category) {
       throw new NotFoundException('دسته‌بندی یافت نشد');
+    }
+
+    if (dto.showInRack) {
+      const rackCount = await this.repository.countRackItems(dto.categoryId);
+      if (rackCount >= 7) {
+        throw new BadRequestException(
+          'این دسته‌بندی از قبل ۷ محصول در رگال دارد؛ ابتدا یکی را از رگال خارج کنید.',
+        );
+      }
     }
 
     const code = await this.categoryRepository.allocateNextProductCode(
