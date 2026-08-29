@@ -76,7 +76,6 @@ export class PricingSettingsController {
     ]);
 
     const updatedProductsCount = await this.pricingService.recalculateAllProductPrices(
-      dto.packagingCost,
       dto.taxPercent,
     );
 

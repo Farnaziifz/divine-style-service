@@ -39,10 +39,20 @@ export class CreateProductHandler implements ICommandHandler<CreateProductComman
     const code = await this.categoryRepository.allocateNextProductCode(
       dto.categoryId,
     );
+    const profitMultiplier = Number(category.profitMultiplier);
     const finalPrice = await this.pricingService.computeFinalPrice(
       dto.costPrice,
-      Number(category.profitMultiplier),
+      profitMultiplier,
     );
+    // تخفیف دستی روی هزینه‌تمام‌شده+سود اعمال می‌شود (نه روی قیمت نهایی مالیات‌خورده)
+    const discountPrice =
+      dto.discountPercent != null && dto.discountPercent > 0
+        ? this.pricingService.calculateDiscountedPrice(
+            dto.costPrice,
+            profitMultiplier,
+            dto.discountPercent,
+          )
+        : undefined;
     const slug = slugify(dto.title, { lower: true });
     const product = await this.repository.create({
       ...dto,
@@ -50,6 +60,7 @@ export class CreateProductHandler implements ICommandHandler<CreateProductComman
       images,
       code,
       finalPrice,
+      ...(discountPrice != null ? { discountPrice } : {}),
     });
 
     try {

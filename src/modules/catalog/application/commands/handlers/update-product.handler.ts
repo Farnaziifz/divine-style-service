@@ -45,19 +45,36 @@ export class UpdateProductHandler implements ICommandHandler<UpdateProductComman
       updateData.images = images;
     }
 
-    // اگر هزینهٔ خالص یا دسته‌بندی عوض شده، قیمت نهایی را دوباره با فرمول محاسبه کن.
+    // اگر هزینهٔ خالص، دسته‌بندی یا درصد تخفیف عوض شده، قیمت نهایی و/یا قیمت تخفیف‌خورده را دوباره محاسبه کن.
     // کد محصول (code) هرگز بعد از ساخت تغییر نمی‌کند، حتی اگر دسته‌بندی عوض شود.
-    if (dto.costPrice != null || dto.categoryId != null) {
+    if (dto.costPrice != null || dto.categoryId != null || dto.discountPercent !== undefined) {
       const categoryId = dto.categoryId ?? product.categoryId;
       const category = await this.categoryRepository.findById(categoryId);
       if (!category) {
         throw new NotFoundException('دسته‌بندی یافت نشد');
       }
       const costPrice = dto.costPrice ?? Number(product.costPrice);
-      updateData.finalPrice = await this.pricingService.computeFinalPrice(
-        costPrice,
-        Number(category.profitMultiplier),
-      );
+      const profitMultiplier = Number(category.profitMultiplier);
+
+      if (dto.costPrice != null || dto.categoryId != null) {
+        updateData.finalPrice = await this.pricingService.computeFinalPrice(
+          costPrice,
+          profitMultiplier,
+        );
+      }
+
+      // تخفیف دستی روی هزینه‌تمام‌شده+سود اعمال می‌شود (نه روی قیمت نهایی مالیات‌خورده)
+      const effectiveDiscountPercent =
+        dto.discountPercent !== undefined ? dto.discountPercent : product.discountPercent;
+      if (effectiveDiscountPercent != null && effectiveDiscountPercent > 0) {
+        updateData.discountPrice = this.pricingService.calculateDiscountedPrice(
+          costPrice,
+          profitMultiplier,
+          effectiveDiscountPercent,
+        );
+      } else if (dto.discountPercent === 0) {
+        updateData.discountPrice = null;
+      }
     }
 
     return this.repository.update(id, updateData);

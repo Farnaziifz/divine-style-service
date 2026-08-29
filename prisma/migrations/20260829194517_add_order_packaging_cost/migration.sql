@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Order" ADD COLUMN "packagingCost" DECIMAL(10,2) NOT NULL DEFAULT 0;

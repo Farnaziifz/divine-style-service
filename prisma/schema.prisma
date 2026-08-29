@@ -579,6 +579,7 @@ model Order {
   totalAmount          Decimal               @default(0) @db.Decimal(10, 2)
   discountCode         String?
   discountAmount       Decimal               @default(0) @db.Decimal(10, 2)
+  packagingCost        Decimal               @default(0) @db.Decimal(10, 2)
   shippingCost         Decimal               @default(0) @db.Decimal(10, 2)
   shippingMethodId     String?               @db.Uuid
   shippingMethod       ShippingMethod?       @relation(fields: [shippingMethodId], references: [id], onDelete: SetNull)

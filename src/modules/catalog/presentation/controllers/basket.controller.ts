@@ -16,6 +16,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { DiscountService } from '../../../discount/discount.service';
 import { PaymentService } from '../../../payment/payment.service';
+import { PricingService } from '../../application/services/pricing.service';
 import { OrderReservationService } from '../../../order/order-reservation.service';
 import { RESERVATION_TTL_MS } from '../../../order/reservation.constants';
 import {
@@ -71,6 +72,7 @@ export class BasketController {
     private readonly prisma: PrismaService,
     private readonly discountService: DiscountService,
     private readonly paymentService: PaymentService,
+    private readonly pricingService: PricingService,
     private readonly orderReservation: OrderReservationService,
   ) {}
 
@@ -465,6 +467,7 @@ export class BasketController {
       if (!method) throw new BadRequestException('روش ارسال معتبر نیست');
       shippingCostCents = toCents(method.price ?? 0);
     }
+    const packagingCostCents = toCents(await this.pricingService.getPackagingCost());
     const discountCodeRaw = dto.discountCode?.trim();
     const discountCode = discountCodeRaw ? discountCodeRaw.toUpperCase() : null;
     let discountAmountCents = 0;
@@ -557,7 +560,7 @@ export class BasketController {
     }
 
     const payableCents =
-      subtotalCents - discountAmountCents + shippingCostCents;
+      subtotalCents - discountAmountCents + shippingCostCents + packagingCostCents;
 
     return {
       subtotal: fromCents(subtotalCents),
@@ -565,6 +568,7 @@ export class BasketController {
       discountMessage,
       discountAmount: fromCents(discountAmountCents),
       shippingCost: fromCents(shippingCostCents),
+      packagingCost: fromCents(packagingCostCents),
       payableAmount: fromCents(payableCents),
       address: selectedAddress,
     };
@@ -740,6 +744,7 @@ export class BasketController {
         shippingMethodTitle = method.title;
         shippingMethodPrice = method.price ?? null;
       }
+      const packagingCostCents = toCents(await this.pricingService.getPackagingCost());
       const discountCodeRaw = dto.discountCode?.trim();
       const discountCode = discountCodeRaw
         ? discountCodeRaw.toUpperCase()
@@ -854,7 +859,7 @@ export class BasketController {
       }
 
       const payableCents =
-        subtotalCents - discountAmountCents + shippingCostCents;
+        subtotalCents - discountAmountCents + shippingCostCents + packagingCostCents;
 
       // Stock was already reserved when these items were added to the
       // basket (see BasketController.upsertItem/updateItem) — nothing to
@@ -897,6 +902,7 @@ export class BasketController {
           discountCode: discountCode ?? discountLabel,
           discountAmount: fromCents(discountAmountCents),
           shippingCost: fromCents(shippingCostCents),
+          packagingCost: fromCents(packagingCostCents),
           shippingMethodId,
           shippingMethodTitle,
           shippingMethodPrice,
