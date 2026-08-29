@@ -18,7 +18,7 @@ export class UpdateProductHandler implements ICommandHandler<UpdateProductComman
 
   async execute(command: UpdateProductCommand) {
     const { id, dto, images } = command;
-    const product = await this.repository.findById(id);
+    const product = await this.repository.findById(id, true);
     if (!product) {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }

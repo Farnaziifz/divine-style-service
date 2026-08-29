@@ -12,7 +12,7 @@ export class DeleteProductHandler implements ICommandHandler<DeleteProductComman
 
   async execute(command: DeleteProductCommand) {
     const { id } = command;
-    const product = await this.repository.findById(id);
+    const product = await this.repository.findById(id, true);
     if (!product) {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }
