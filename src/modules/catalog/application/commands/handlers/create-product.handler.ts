@@ -39,7 +39,11 @@ export class CreateProductHandler implements ICommandHandler<CreateProductComman
     const code = await this.categoryRepository.allocateNextProductCode(
       dto.categoryId,
     );
-    const profitMultiplier = Number(category.profitMultiplier);
+    // ضریب سود مخصوص خود محصول است؛ اگر ادمین ندهد، ضریب دسته‌بندی به‌عنوان پیش‌فرض اولیه استفاده می‌شود
+    const profitMultiplier =
+      dto.profitMultiplier != null
+        ? dto.profitMultiplier
+        : Number(category.profitMultiplier);
     const finalPrice = await this.pricingService.computeFinalPrice(
       dto.costPrice,
       profitMultiplier,
@@ -59,6 +63,7 @@ export class CreateProductHandler implements ICommandHandler<CreateProductComman
       slug,
       images,
       code,
+      profitMultiplier,
       finalPrice,
       ...(discountPrice != null ? { discountPrice } : {}),
     });

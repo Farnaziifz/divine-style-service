@@ -79,8 +79,8 @@ export class PricingService {
       select: {
         id: true,
         costPrice: true,
+        profitMultiplier: true,
         discountPercent: true,
-        category: { select: { profitMultiplier: true } },
       },
     });
 
@@ -88,7 +88,7 @@ export class PricingService {
 
     await this.prisma.$transaction(
       products.map((p) => {
-        const profitMultiplier = Number(p.category.profitMultiplier);
+        const profitMultiplier = Number(p.profitMultiplier);
         const costPrice = Number(p.costPrice);
         return this.prisma.product.update({
           where: { id: p.id },

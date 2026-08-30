@@ -90,6 +90,15 @@ export class CreateProductDto {
   @Min(0)
   costPrice: number;
 
+  @ApiPropertyOptional({
+    description: 'ضریب سود این محصول (اگر ندهید، ضریب سود دسته‌بندی به‌عنوان مقدار پیش‌فرض استفاده می‌شود)',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  profitMultiplier?: number;
+
   @ApiPropertyOptional({ description: 'تخفیف دستی روی قیمت نهایی (مبلغ)' })
   @IsOptional()
   @Type(() => Number)

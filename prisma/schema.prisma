@@ -352,8 +352,9 @@ model Product {
   collections Collection[]
 
   // کدگذاری و قیمت‌گذاری (سطح محصول، نه واریانت)
-  code            Int      @unique // کد خودکار محصول (بر اساس بازهٔ کد دسته‌بندی)
-  costPrice       Decimal  @db.Decimal(12, 2) // بهای تمام‌شدهٔ خالص (ورودی ادمین)
+  code             Int      @unique // کد خودکار محصول (بر اساس بازهٔ کد دسته‌بندی)
+  costPrice        Decimal  @db.Decimal(12, 2) // بهای تمام‌شدهٔ خالص (ورودی ادمین)
+  profitMultiplier Decimal  @default(1) @db.Decimal(6, 2) // ضریب سود این محصول (قبلاً از دسته‌بندی می‌آمد، الان مستقل و مخصوص خود محصول است)
   finalPrice      Decimal  @db.Decimal(12, 2) // قیمت نهایی محاسبه‌شده از فرمول
   discountPrice   Decimal? @db.Decimal(12, 2) // تخفیف دستی روی finalPrice (اختیاری)
   discountPercent Int? // درصد تخفیف دستی (اختیاری)

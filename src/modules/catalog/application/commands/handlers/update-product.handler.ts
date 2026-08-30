@@ -40,23 +40,27 @@ export class UpdateProductHandler implements ICommandHandler<UpdateProductComman
       }
     }
 
+    // دسته‌بندی مقصد باید وجود داشته باشد؛ ضریب سود دیگر از دسته‌بندی نمی‌آید (مستقل و مخصوص خود محصول است)
+    if (dto.categoryId != null && dto.categoryId !== product.categoryId) {
+      const category = await this.categoryRepository.findById(dto.categoryId);
+      if (!category) {
+        throw new NotFoundException('دسته‌بندی یافت نشد');
+      }
+    }
+
     const updateData: any = { ...dto, slug };
     if (images) {
       updateData.images = images;
     }
 
-    // اگر هزینهٔ خالص، دسته‌بندی یا درصد تخفیف عوض شده، قیمت نهایی و/یا قیمت تخفیف‌خورده را دوباره محاسبه کن.
+    // اگر هزینهٔ خالص، ضریب سود یا درصد تخفیف عوض شده، قیمت نهایی و/یا قیمت تخفیف‌خورده را دوباره محاسبه کن.
     // کد محصول (code) هرگز بعد از ساخت تغییر نمی‌کند، حتی اگر دسته‌بندی عوض شود.
-    if (dto.costPrice != null || dto.categoryId != null || dto.discountPercent !== undefined) {
-      const categoryId = dto.categoryId ?? product.categoryId;
-      const category = await this.categoryRepository.findById(categoryId);
-      if (!category) {
-        throw new NotFoundException('دسته‌بندی یافت نشد');
-      }
+    if (dto.costPrice != null || dto.profitMultiplier != null || dto.discountPercent !== undefined) {
       const costPrice = dto.costPrice ?? Number(product.costPrice);
-      const profitMultiplier = Number(category.profitMultiplier);
+      const profitMultiplier =
+        dto.profitMultiplier != null ? dto.profitMultiplier : Number(product.profitMultiplier);
 
-      if (dto.costPrice != null || dto.categoryId != null) {
+      if (dto.costPrice != null || dto.profitMultiplier != null) {
         updateData.finalPrice = await this.pricingService.computeFinalPrice(
           costPrice,
           profitMultiplier,
