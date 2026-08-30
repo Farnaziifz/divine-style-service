@@ -16,7 +16,7 @@ import { PrismaService } from '../shared/prisma/prisma.service';
 import { PaginationDto } from '../shared/dtos/pagination.dto';
 import { PaymentService } from './payment.service';
 import { OrderReservationService } from '../order/order-reservation.service';
-import { RESERVATION_TTL_MS } from '../order/reservation.constants';
+import { RESERVATION_TTL_MS, orderSettleLockKey } from '../order/reservation.constants';
 import { SmsTextService } from '../shared/sms/sms-text.service';
 import { CashbackGrantService } from '../loyalty/cashback-incentive/cashback-grant.service';
 import { CouponTriggerService } from '../loyalty/coupon-incentive/coupon-trigger.service';
@@ -407,6 +407,24 @@ export class PaymentController {
     const callbackResult = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`zarinpal-callback:${authority}`}))`;
 
+      const lookup = await tx.paymentTransaction.findFirst({
+        where: { authority, isDeleted: false },
+        select: { orderId: true },
+      });
+
+      if (!lookup) {
+        return {
+          redirect: `${frontendUrl}/${language}/payment/failed`,
+          paid: null,
+        };
+      }
+
+      // همون قفلی که sweeper پیش از آزادسازی این سفارش می‌گیرد — تضمین می‌کند
+      // آزادسازی (تایم‌اوت رزرو) و تأیید این کال‌بک هرگز هم‌زمان روی یک سفارش
+      // interleave نشوند، حتی زیر بار همزمان بالا. باید قبل از خوندن وضعیت
+      // فعلی سفارش گرفته بشه، وگرنه snapshot زیر دستمون تغییر می‌کنه.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderSettleLockKey(lookup.orderId)}))`;
+
       const current = await tx.paymentTransaction.findFirst({
         where: { authority, isDeleted: false },
         include: { order: { include: { user: { select: { mobile: true } } } } },
@@ -462,7 +480,12 @@ export class PaymentController {
         };
       }
 
-      await tx.paymentTransaction.updateMany({
+      // درگاه همین الان پرداخت موفق رو تأیید کرد. اگه sweeper به‌خاطر تأخیر
+      // (اینترنت کند/بار همزمان) این سفارش رو زودتر آزاد کرده باشه، این
+      // آپدیت‌های guard-شده هیچ ردیفی رو match نمی‌کنن — نباید سکوت کنیم و
+      // «پرداخت موفق» رو بدون تغییر واقعی دیتابیس اعلام کنیم (این همون باگیه
+      // که پیامک اشتباه می‌فرستاد). باید صریحاً چک و در صورت نیاز احیا کنیم.
+      const txUpdate = await tx.paymentTransaction.updateMany({
         where: { id: current.id, status: 'INITIATED' },
         data: {
           status: 'PAID',
@@ -470,7 +493,7 @@ export class PaymentController {
           verifiedAt: new Date(),
         },
       });
-      await tx.order.updateMany({
+      const orderUpdate = await tx.order.updateMany({
         where: { id: orderId, paymentStatus: 'PENDING' },
         data: {
           paymentStatus: 'PAID',
@@ -479,16 +502,59 @@ export class PaymentController {
         },
       });
 
+      let settled = txUpdate.count > 0 && orderUpdate.count > 0;
+
+      if (!settled) {
+        const resurrection = await this.orderReservation.confirmPaidAfterRelease(
+          tx,
+          orderId,
+        );
+        if (resurrection.resurrected) {
+          await tx.paymentTransaction.updateMany({
+            where: { id: current.id },
+            data: {
+              status: 'PAID',
+              refId: verified.refId || null,
+              verifiedAt: new Date(),
+            },
+          });
+          await tx.order.updateMany({
+            where: { id: orderId },
+            data: {
+              paymentStatus: 'PAID',
+              orderStatus: 'PAID',
+              paidAt: new Date(),
+            },
+          });
+          settled = true;
+          if (resurrection.stockShortages.length > 0) {
+            this.logger.error(
+              `Order ${orderCode} paid after being released early (variants short on stock: ${resurrection.stockShortages.join(', ')}) — needs manual stock review`,
+            );
+          } else {
+            this.logger.warn(
+              `Order ${orderCode} paid after being released early by the reservation sweeper — resurrected successfully`,
+            );
+          }
+        } else {
+          this.logger.error(
+            `Order ${orderCode}: Zarinpal confirmed payment (refId ${verified.refId}) but the order could not be settled or resurrected — needs manual reconciliation`,
+          );
+        }
+      }
+
       return {
         redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
-        paid: {
-          orderId,
-          userId: current.order!.userId,
-          customerMobile: current.order?.user?.mobile,
-          discountCode: current.order?.discountCode ?? null,
-          orderCode,
-          payableAmount: Math.round(Number(current.amount)),
-        },
+        paid: settled
+          ? {
+              orderId,
+              userId: current.order!.userId,
+              customerMobile: current.order?.user?.mobile,
+              discountCode: current.order?.discountCode ?? null,
+              orderCode,
+              payableAmount: Math.round(Number(current.amount)),
+            }
+          : null,
       };
     });
 
@@ -526,6 +592,24 @@ export class PaymentController {
 
     const callbackResult = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`zibal-callback:${trackId}`}))`;
+
+      const lookup = await tx.paymentTransaction.findFirst({
+        where: { authority: trackId, isDeleted: false },
+        select: { orderId: true },
+      });
+
+      if (!lookup) {
+        return {
+          redirect: `${frontendUrl}/${language}/payment/failed`,
+          paid: null,
+        };
+      }
+
+      // همون قفلی که sweeper پیش از آزادسازی این سفارش می‌گیرد — تضمین می‌کند
+      // آزادسازی (تایم‌اوت رزرو) و تأیید این کال‌بک هرگز هم‌زمان روی یک سفارش
+      // interleave نشوند، حتی زیر بار همزمان بالا. باید قبل از خوندن وضعیت
+      // فعلی سفارش گرفته بشه، وگرنه snapshot زیر دستمون تغییر می‌کنه.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderSettleLockKey(lookup.orderId)}))`;
 
       const current = await tx.paymentTransaction.findFirst({
         where: { authority: trackId, isDeleted: false },
@@ -596,7 +680,12 @@ export class PaymentController {
         };
       }
 
-      await tx.paymentTransaction.updateMany({
+      // درگاه همین الان پرداخت موفق رو تأیید کرد. اگه sweeper به‌خاطر تأخیر
+      // (اینترنت کند/بار همزمان) این سفارش رو زودتر آزاد کرده باشه، این
+      // آپدیت‌های guard-شده هیچ ردیفی رو match نمی‌کنن — نباید سکوت کنیم و
+      // «پرداخت موفق» رو بدون تغییر واقعی دیتابیس اعلام کنیم (این همون باگیه
+      // که پیامک اشتباه می‌فرستاد). باید صریحاً چک و در صورت نیاز احیا کنیم.
+      const txUpdate = await tx.paymentTransaction.updateMany({
         where: { id: current.id, status: 'INITIATED' },
         data: {
           status: 'PAID',
@@ -604,7 +693,7 @@ export class PaymentController {
           verifiedAt: new Date(),
         },
       });
-      await tx.order.updateMany({
+      const orderUpdate = await tx.order.updateMany({
         where: { id: currentOrderId, paymentStatus: 'PENDING' },
         data: {
           paymentStatus: 'PAID',
@@ -613,16 +702,59 @@ export class PaymentController {
         },
       });
 
+      let settled = txUpdate.count > 0 && orderUpdate.count > 0;
+
+      if (!settled) {
+        const resurrection = await this.orderReservation.confirmPaidAfterRelease(
+          tx,
+          currentOrderId,
+        );
+        if (resurrection.resurrected) {
+          await tx.paymentTransaction.updateMany({
+            where: { id: current.id },
+            data: {
+              status: 'PAID',
+              refId: verified.refId || null,
+              verifiedAt: new Date(),
+            },
+          });
+          await tx.order.updateMany({
+            where: { id: currentOrderId },
+            data: {
+              paymentStatus: 'PAID',
+              orderStatus: 'PAID',
+              paidAt: new Date(),
+            },
+          });
+          settled = true;
+          if (resurrection.stockShortages.length > 0) {
+            this.logger.error(
+              `Order ${orderCode} paid after being released early (variants short on stock: ${resurrection.stockShortages.join(', ')}) — needs manual stock review`,
+            );
+          } else {
+            this.logger.warn(
+              `Order ${orderCode} paid after being released early by the reservation sweeper — resurrected successfully`,
+            );
+          }
+        } else {
+          this.logger.error(
+            `Order ${orderCode}: Zibal confirmed payment (refId ${verified.refId}) but the order could not be settled or resurrected — needs manual reconciliation`,
+          );
+        }
+      }
+
       return {
         redirect: `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`,
-        paid: {
-          orderId: currentOrderId,
-          userId: current.order!.userId,
-          customerMobile: current.order?.user?.mobile,
-          discountCode: current.order?.discountCode ?? null,
-          orderCode,
-          payableAmount: Math.round(Number(current.amount)),
-        },
+        paid: settled
+          ? {
+              orderId: currentOrderId,
+              userId: current.order!.userId,
+              customerMobile: current.order?.user?.mobile,
+              discountCode: current.order?.discountCode ?? null,
+              orderCode,
+              payableAmount: Math.round(Number(current.amount)),
+            }
+          : null,
       };
     });
 

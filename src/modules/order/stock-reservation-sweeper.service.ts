@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { OrderReservationService } from './order-reservation.service';
-import { RESERVATION_TTL_MS } from './reservation.constants';
+import { RESERVATION_TTL_MS, orderSettleLockKey } from './reservation.constants';
 
 /**
  * Proactively releases stock reservations that were never converted into a
@@ -71,9 +71,12 @@ export class StockReservationSweeperService {
 
     let released = 0;
     for (const order of stale) {
-      const ok = await this.prisma.$transaction((tx) =>
-        this.orderReservation.releaseOrder(tx, order.id),
-      );
+      // همون قفلی که کال‌بک درگاه پرداخت روی این سفارش می‌گیرد؛ تضمین می‌کند
+      // آزادسازی و تأیید پرداخت هرگز هم‌زمان روی یک سفارش interleave نشوند.
+      const ok = await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderSettleLockKey(order.id)}))`;
+        return this.orderReservation.releaseOrder(tx, order.id);
+      });
       if (ok) released++;
     }
     if (released > 0) {

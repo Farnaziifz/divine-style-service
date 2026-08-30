@@ -65,4 +65,71 @@ export class OrderReservationService {
 
     return true;
   }
+
+  /**
+   * Called from a gateway callback when the payment provider just confirmed
+   * a real success but the guarded PENDING→PAID update matched nothing —
+   * meaning the sweeper (or a prior failure path) already released this
+   * order before the confirmation arrived (slow network, slow bank OTP, or
+   * the callback simply landing more than RESERVATION_TTL_MS after
+   * checkout). The gateway's word is authoritative: the customer's money is
+   * gone, so we re-apply the stock/discount reservation this order needs
+   * and hand it back to the caller to mark PAID — we never silently drop a
+   * confirmed payment on the floor just because we gave up on it early.
+   *
+   * Caller must hold the per-order advisory lock (orderSettleLockKey) and
+   * must re-check paymentStatus !== 'PAID' itself if calling this outside
+   * the normal callback flow, to stay idempotent against double callbacks.
+   */
+  async confirmPaidAfterRelease(
+    tx: Prisma.TransactionClient,
+    orderId: string,
+  ): Promise<{ resurrected: boolean; stockShortages: string[] }> {
+    const order = await tx.order.findFirst({
+      where: { id: orderId, isDeleted: false },
+      select: { id: true, paymentStatus: true, discountCode: true },
+    });
+    if (!order || order.paymentStatus === 'PAID') {
+      return { resurrected: false, stockShortages: [] };
+    }
+
+    const items = await tx.orderItem.findMany({
+      where: { orderId, isDeleted: false },
+      select: { productVariantId: true, quantity: true },
+    });
+    const quantityByVariant = new Map<string, number>();
+    for (const item of items) {
+      quantityByVariant.set(
+        item.productVariantId,
+        (quantityByVariant.get(item.productVariantId) ?? 0) + item.quantity,
+      );
+    }
+
+    // بهترین تلاش برای رزرو دوباره موجودی؛ حتی اگر موجودی کم بیاید، چون پول
+    // واقعاً از مشتری گرفته شده، سفارش باید PAID شود — کمبود فقط لاگ می‌شود
+    // تا ادمین دستی رسیدگی کند، هرگز نباید مانع تکمیل یک پرداخت واقعی شود.
+    const stockShortages: string[] = [];
+    for (const [productVariantId, quantity] of quantityByVariant.entries()) {
+      const result = await tx.productVariant.updateMany({
+        where: {
+          id: productVariantId,
+          isDeleted: false,
+          stock: { gte: quantity },
+        },
+        data: { stock: { decrement: quantity } },
+      });
+      if (result.count === 0) {
+        stockShortages.push(productVariantId);
+      }
+    }
+
+    if (order.discountCode) {
+      await tx.discountCode.updateMany({
+        where: { code: order.discountCode, isDeleted: false },
+        data: { usedCount: { increment: 1 } },
+      });
+    }
+
+    return { resurrected: true, stockShortages };
+  }
 }
