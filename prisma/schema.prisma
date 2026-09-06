@@ -37,6 +37,10 @@ model User {
   segmentMemberships        SegmentMembership[]
   incentiveRedemptions      IncentiveRedemption[]
   wallet                    Wallet?
+  referralCodes             ReferralCode[]             @relation("ReferralCodeOwner")
+  referralRedemptions       ReferralRedemption[]       @relation("ReferralRedemptionBuyer")
+  walletTopUps              WalletTopUp[]
+  walletWithdrawalRequests  WalletWithdrawalRequest[]
   directConversation        DirectConversation?
   directMessages            DirectMessage[]            @relation("DirectMessageAuthor")
   offlineSales              OfflineSale[]
@@ -342,6 +346,9 @@ model Product {
   metaTitle       String?
   metaDescription String?
 
+  // گارانتی محصول (برای متاتگ/فید ترب)
+  guarantee String?
+
   // Media (General product images/video)
   images String[] // URLs stored as array of strings
   video  String? // URL
@@ -593,6 +600,7 @@ model Order {
   paidAt               DateTime?
   payments             PaymentTransaction[]
   incentiveRedemptions IncentiveRedemption[]
+  referralRedemption   ReferralRedemption?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   isDeleted            Boolean               @default(false)
@@ -915,6 +923,10 @@ enum CreditLedgerReason {
   USED
   EXPIRED
   ADJUSTMENT
+  /// شارژ مستقیم کیف‌پول از درگاه پرداخت
+  TOPUP
+  /// برداشت هولد‌شده در انتظار تسویهٔ دستی ادمین
+  WITHDRAWAL_REQUEST
 }
 
 model CreditLedgerEntry {
@@ -931,6 +943,106 @@ model CreditLedgerEntry {
   createdAt             DateTime             @default(now())
 
   @@index([walletId])
+}
+
+// ----------------------
+// Referral codes (کد/لینک ریفرال کاربران)
+// ----------------------
+
+model ReferralCode {
+  id              String    @id @default(uuid()) @db.Uuid
+  code            String    @unique
+  ownerId         String    @db.Uuid
+  owner           User      @relation("ReferralCodeOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  /// سهم تخفیف خریدار (درصد)
+  discountPercent Decimal   @db.Decimal(5, 2)
+  /// سهم کش‌بک معرف (درصد) — discountPercent + cashbackPercent <= 15
+  cashbackPercent Decimal   @db.Decimal(5, 2)
+  /// آیا این کد توسط ادمین برای بلاگر ساخته شده (صرفاً برای گزارش/فیلتر)
+  createdByAdmin  Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  usedCount       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  isDeleted       Boolean   @default(false)
+  deletedAt       DateTime?
+
+  redemptions ReferralRedemption[]
+
+  @@index([ownerId])
+  @@index([code])
+}
+
+enum ReferralCashbackStatus {
+  /// سفارش هنوز پرداخت نشده
+  PENDING
+  /// کش‌بک به کیف‌پول معرف واریز شد
+  CREDITED
+}
+
+model ReferralRedemption {
+  id             String                 @id @default(uuid()) @db.Uuid
+  referralCodeId String                 @db.Uuid
+  referralCode   ReferralCode           @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
+  buyerId        String                 @db.Uuid
+  buyer          User                   @relation("ReferralRedemptionBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  orderId        String                 @unique @db.Uuid
+  order          Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  discountAmount Decimal                @db.Decimal(12, 2)
+  cashbackAmount Decimal                @db.Decimal(12, 2)
+  cashbackStatus ReferralCashbackStatus @default(PENDING)
+  createdAt      DateTime               @default(now())
+  creditedAt     DateTime?
+
+  @@index([referralCodeId])
+  @@index([buyerId])
+}
+
+// ----------------------
+// کیف‌پول: شارژ از درگاه + درخواست برداشت
+// ----------------------
+
+enum WalletTopUpStatus {
+  INITIATED
+  PAID
+  FAILED
+}
+
+model WalletTopUp {
+  id         String            @id @default(uuid()) @db.Uuid
+  userId     String            @db.Uuid
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider   PaymentProvider
+  status     WalletTopUpStatus @default(INITIATED)
+  amount     Decimal           @db.Decimal(12, 2)
+  authority  String?           @unique
+  refId      String?
+  createdAt  DateTime          @default(now())
+  verifiedAt DateTime?
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum WalletWithdrawalStatus {
+  PENDING
+  PAID
+  REJECTED
+}
+
+model WalletWithdrawalRequest {
+  id          String                 @id @default(uuid()) @db.Uuid
+  userId      String                 @db.Uuid
+  user        User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      Decimal                @db.Decimal(12, 2)
+  cardNumber  String
+  status      WalletWithdrawalStatus @default(PENDING)
+  adminNote   String?
+  requestedAt DateTime               @default(now())
+  resolvedAt  DateTime?
+
+  @@index([userId])
+  @@index([status])
 }
 
 model ChurnEvaluationSnapshot {

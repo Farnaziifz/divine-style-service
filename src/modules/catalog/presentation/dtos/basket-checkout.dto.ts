@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class BasketCheckoutDto {
   @ApiProperty()
@@ -26,4 +27,11 @@ export class BasketCheckoutDto {
   @IsString()
   @IsIn(['ZARINPAL', 'ZIBAL'])
   paymentProvider?: 'ZARINPAL' | 'ZIBAL';
+
+  @ApiPropertyOptional({ description: 'مبلغ درخواستی برای اعمال از کیف‌پول (تومان)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  walletAmount?: number;
 }

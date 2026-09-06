@@ -6,6 +6,9 @@ import { DiscountModule } from '../discount/discount.module';
 import { PaymentModule } from '../payment/payment.module';
 import { OrderModule } from '../order/order.module';
 import { ContentCalendarModule } from '../content-calendar/content-calendar.module';
+import { ReferralModule } from '../referral/referral.module';
+import { WalletModule } from '../wallet/wallet.module';
+import { LoyaltyModule } from '../loyalty/loyalty.module';
 
 // Controllers
 import { CollectionController } from './presentation/controllers/collection.controller';
@@ -60,6 +63,9 @@ import { GetSpecificationKeysHandler } from './application/queries/handlers/get-
     PaymentModule,
     OrderModule,
     ContentCalendarModule,
+    ReferralModule,
+    WalletModule,
+    LoyaltyModule,
     JwtModule.register({}),
   ],
   // Registered controllers

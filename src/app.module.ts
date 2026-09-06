@@ -21,6 +21,9 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { ContentCalendarModule } from './modules/content-calendar/content-calendar.module';
 import { CustomerGroupModule } from './modules/customer-group/customer-group.module';
 import { LoyaltyModule } from './modules/loyalty/loyalty.module';
+import { TorobFeedModule } from './modules/torob-feed/torob-feed.module';
+import { ReferralModule } from './modules/referral/referral.module';
+import { WalletModule } from './modules/wallet/wallet.module';
 
 @Module({
   imports: [
@@ -50,6 +53,9 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
     ContentCalendarModule,
     CustomerGroupModule,
     LoyaltyModule,
+    TorobFeedModule,
+    ReferralModule,
+    WalletModule,
   ],
   controllers: [AppController],
   providers: [

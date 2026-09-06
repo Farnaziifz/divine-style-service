@@ -10,6 +10,7 @@ import {
   IsNumber,
   Min,
   Max,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -52,6 +53,12 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   metaDescription?: string;
+
+  @ApiPropertyOptional({ description: 'گارانتی محصول (برای فید ترب)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  guarantee?: string;
 
   @ApiProperty()
   @IsArray()

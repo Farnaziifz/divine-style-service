@@ -15,10 +15,18 @@ import { AuthGuard } from '@nestjs/passport';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { DiscountService } from '../../../discount/discount.service';
+import {
+  ReferralCheckoutLookup,
+  ReferralService,
+} from '../../../referral/referral.service';
+import { WalletService } from '../../../wallet/wallet.service';
 import { PaymentService } from '../../../payment/payment.service';
 import { PricingService } from '../../application/services/pricing.service';
 import { OrderReservationService } from '../../../order/order-reservation.service';
 import { RESERVATION_TTL_MS } from '../../../order/reservation.constants';
+import { CashbackGrantService } from '../../../loyalty/cashback-incentive/cashback-grant.service';
+import { CouponTriggerService } from '../../../loyalty/coupon-incentive/coupon-trigger.service';
+import { ReferralCashbackService } from '../../../referral/referral-cashback.service';
 import {
   calculateDiscountAmount,
   validateRedemption,
@@ -71,10 +79,34 @@ export class BasketController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly discountService: DiscountService,
+    private readonly referralService: ReferralService,
+    private readonly walletService: WalletService,
     private readonly paymentService: PaymentService,
     private readonly pricingService: PricingService,
     private readonly orderReservation: OrderReservationService,
+    private readonly cashbackGrant: CashbackGrantService,
+    private readonly couponTrigger: CouponTriggerService,
+    private readonly referralCashback: ReferralCashbackService,
   ) {}
+
+  /** Best-effort — same as PaymentController: a grant failure must never affect checkout. */
+  private async grantIncentivesForOrder(orderId: string): Promise<void> {
+    try {
+      await this.cashbackGrant.grantForOrder(orderId);
+    } catch {
+      // swallow
+    }
+    try {
+      await this.couponTrigger.onOrderCompleted(orderId);
+    } catch {
+      // swallow
+    }
+    try {
+      await this.referralCashback.grantForOrder(orderId);
+    } catch {
+      // swallow
+    }
+  }
 
   private async getOrCreateActiveBasket(userId: string) {
     const existing = await this.prisma.tempBasket.findFirst({
@@ -541,10 +573,19 @@ export class BasketController {
           subtotalCents,
           now,
         );
-        if (!loyalty) {
-          throw new BadRequestException('کد تخفیف معتبر نیست');
+        if (loyalty) {
+          discountAmountCents = loyalty.amountCents;
+        } else {
+          const referral = await this.referralService.lookupForCheckout(
+            discountCode,
+            subtotalCents,
+            userId,
+          );
+          if (!referral) {
+            throw new BadRequestException('کد تخفیف معتبر نیست');
+          }
+          discountAmountCents = referral.discountAmountCents;
         }
-        discountAmountCents = loyalty.amountCents;
       }
     } else {
       const auto = await this.computeAutoWelcomeDiscount(
@@ -559,8 +600,17 @@ export class BasketController {
       }
     }
 
-    const payableCents =
+    const remainingPayableCents =
       subtotalCents - discountAmountCents + shippingCostCents + packagingCostCents;
+    const walletAmountCents = toCents(dto.walletAmount ?? 0);
+    const walletAmountApplied = walletAmountCents
+      ? await this.walletService.applyToCheckout(
+          userId,
+          walletAmountCents,
+          remainingPayableCents,
+        )
+      : 0;
+    const payableCents = remainingPayableCents - walletAmountApplied;
 
     return {
       subtotal: fromCents(subtotalCents),
@@ -569,6 +619,7 @@ export class BasketController {
       discountAmount: fromCents(discountAmountCents),
       shippingCost: fromCents(shippingCostCents),
       packagingCost: fromCents(packagingCostCents),
+      walletAmountApplied: fromCents(walletAmountApplied),
       payableAmount: fromCents(payableCents),
       address: selectedAddress,
     };
@@ -751,6 +802,7 @@ export class BasketController {
         : null;
       let discountAmountCents = 0;
       let loyaltyIncentiveId: string | null = null;
+      let referralLookup: ReferralCheckoutLookup | null = null;
       let discountLabel: string | null = null;
 
       if (discountCode) {
@@ -840,11 +892,21 @@ export class BasketController {
             subtotalCents,
             now,
           );
-          if (!loyalty) {
-            throw new BadRequestException('کد تخفیف معتبر نیست');
+          if (loyalty) {
+            discountAmountCents = loyalty.amountCents;
+            loyaltyIncentiveId = loyalty.incentiveId;
+          } else {
+            const referral = await this.referralService.lookupForCheckout(
+              discountCode,
+              subtotalCents,
+              userId,
+            );
+            if (!referral) {
+              throw new BadRequestException('کد تخفیف معتبر نیست');
+            }
+            discountAmountCents = referral.discountAmountCents;
+            referralLookup = referral;
           }
-          discountAmountCents = loyalty.amountCents;
-          loyaltyIncentiveId = loyalty.incentiveId;
         }
       } else {
         const auto = await this.computeAutoWelcomeDiscount(
@@ -858,8 +920,17 @@ export class BasketController {
         }
       }
 
-      const payableCents =
+      const remainingPayableCents =
         subtotalCents - discountAmountCents + shippingCostCents + packagingCostCents;
+      const requestedWalletCents = toCents(dto.walletAmount ?? 0);
+      const walletAmountApplied = requestedWalletCents
+        ? await this.walletService.applyToCheckout(
+            userId,
+            requestedWalletCents,
+            remainingPayableCents,
+          )
+        : 0;
+      const payableCents = remainingPayableCents - walletAmountApplied;
 
       // Stock was already reserved when these items were added to the
       // basket (see BasketController.upsertItem/updateItem) — nothing to
@@ -924,6 +995,26 @@ export class BasketController {
         });
       }
 
+      if (referralLookup) {
+        await tx.referralRedemption.create({
+          data: {
+            referralCodeId: referralLookup.referralCodeId,
+            buyerId: userId,
+            orderId: order.id,
+            discountAmount: fromCents(discountAmountCents),
+            cashbackAmount: new Prisma.Decimal(referralLookup.cashbackAmount),
+          },
+        });
+        await tx.referralCode.update({
+          where: { id: referralLookup.referralCodeId },
+          data: { usedCount: { increment: 1 } },
+        });
+      }
+
+      if (walletAmountApplied > 0) {
+        await this.walletService.debitForCheckout(tx, userId, walletAmountApplied);
+      }
+
       await tx.orderItem.createMany({
         data: basket.items.map((item) => {
           const variant = item.productVariant;
@@ -983,6 +1074,37 @@ export class BasketController {
         ? `${backendUrl}/payments/zibal/callback?lang=${requestedLang}`
         : `${backendUrl}/payments/zarinpal/callback?lang=${requestedLang}`;
     const amountToman = Math.round(Number(baseResult.payableAmount));
+
+    if (amountToman === 0) {
+      await this.prisma.$transaction([
+        this.prisma.paymentTransaction.updateMany({
+          where: { id: baseResult.paymentTransactionId, status: 'INITIATED' },
+          data: {
+            status: 'PAID',
+            refId: `WALLET-${Date.now()}`,
+            verifiedAt: new Date(),
+          },
+        }),
+        this.prisma.order.updateMany({
+          where: { id: baseResult.orderId, paymentStatus: 'PENDING' },
+          data: {
+            paymentStatus: 'PAID',
+            orderStatus: 'PAID',
+            paidAt: new Date(),
+          },
+        }),
+      ]);
+
+      await this.grantIncentivesForOrder(baseResult.orderId);
+
+      return {
+        orderId: baseResult.orderId,
+        orderCode: baseResult.orderCode,
+        payableAmount: baseResult.payableAmount,
+        paymentStatus: 'PAID',
+        paymentUrl: null,
+      };
+    }
 
     let requested: {
       authority: string;
@@ -1079,6 +1201,8 @@ export class BasketController {
           },
         }),
       ]);
+
+      await this.grantIncentivesForOrder(baseResult.orderId);
 
       return {
         orderId: baseResult.orderId,

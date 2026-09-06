@@ -20,6 +20,7 @@ import { RESERVATION_TTL_MS, orderSettleLockKey } from '../order/reservation.con
 import { SmsTextService } from '../shared/sms/sms-text.service';
 import { CashbackGrantService } from '../loyalty/cashback-incentive/cashback-grant.service';
 import { CouponTriggerService } from '../loyalty/coupon-incentive/coupon-trigger.service';
+import { ReferralCashbackService } from '../referral/referral-cashback.service';
 import { welcomeTierForPriorPaidCount } from '../discount/welcome-tier.rules';
 
 @ApiTags('Payment')
@@ -41,6 +42,7 @@ export class PaymentController {
     private readonly smsText: SmsTextService,
     private readonly cashbackGrant: CashbackGrantService,
     private readonly couponTrigger: CouponTriggerService,
+    private readonly referralCashback: ReferralCashbackService,
   ) {}
 
   private formatOrderDateJalali(date: Date): string {
@@ -132,6 +134,15 @@ export class PaymentController {
   private async evaluateCouponTriggersForOrder(orderId: string): Promise<void> {
     try {
       await this.couponTrigger.onOrderCompleted(orderId);
+    } catch {
+      // swallow — see comment above.
+    }
+  }
+
+  /** Best-effort — a referral cashback failure must never affect the payment callback flow. */
+  private async grantReferralCashbackForOrder(orderId: string): Promise<void> {
+    try {
+      await this.referralCashback.grantForOrder(orderId);
     } catch {
       // swallow — see comment above.
     }
@@ -568,6 +579,7 @@ export class PaymentController {
       );
       void this.grantCashbackForOrder(callbackResult.paid.orderId);
       void this.evaluateCouponTriggersForOrder(callbackResult.paid.orderId);
+      void this.grantReferralCashbackForOrder(callbackResult.paid.orderId);
       void this.notifyNextWelcomeTier(
         callbackResult.paid.userId,
         callbackResult.paid.customerMobile,
@@ -768,6 +780,7 @@ export class PaymentController {
       );
       void this.grantCashbackForOrder(callbackResult.paid.orderId);
       void this.evaluateCouponTriggersForOrder(callbackResult.paid.orderId);
+      void this.grantReferralCashbackForOrder(callbackResult.paid.orderId);
       void this.notifyNextWelcomeTier(
         callbackResult.paid.userId,
         callbackResult.paid.customerMobile,
