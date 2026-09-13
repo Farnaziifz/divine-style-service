@@ -24,6 +24,8 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
 import { TorobFeedModule } from './modules/torob-feed/torob-feed.module';
 import { ReferralModule } from './modules/referral/referral.module';
 import { WalletModule } from './modules/wallet/wallet.module';
+import { EventModule } from './modules/event/event.module';
+import { StyleGameModule } from './modules/style-game/style-game.module';
 
 @Module({
   imports: [
@@ -56,6 +58,8 @@ import { WalletModule } from './modules/wallet/wallet.module';
     TorobFeedModule,
     ReferralModule,
     WalletModule,
+    EventModule,
+    StyleGameModule,
   ],
   controllers: [AppController],
   providers: [

@@ -71,6 +71,15 @@ export class MinioService implements OnModuleInit {
     folder: string = 'products',
   ): Promise<string> {
     const fileExt = extname(file.originalname);
+    return this.uploadBuffer(file.buffer, file.mimetype, folder, fileExt);
+  }
+
+  async uploadBuffer(
+    buffer: Buffer,
+    mimetype: string,
+    folder: string,
+    fileExt: string = '.png',
+  ): Promise<string> {
     const fileName = `${folder}/${uuidv4()}${fileExt}`;
 
     try {
@@ -78,8 +87,8 @@ export class MinioService implements OnModuleInit {
         new PutObjectCommand({
           Bucket: this.bucketName,
           Key: fileName,
-          Body: file.buffer,
-          ContentType: file.mimetype,
+          Body: buffer,
+          ContentType: mimetype,
           // ACL: ObjectCannedACL.public_read, // Optional: depends on MinIO policy
         }),
       );

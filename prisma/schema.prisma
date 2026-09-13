@@ -34,6 +34,7 @@ model User {
   discountCodes             DiscountCode[]
   discountCodeEligibilities DiscountCodeEligibleUser[]
   customerGroupMemberships  CustomerGroupMember[]
+  styleGameSessions         StyleGameSession[]
   segmentMemberships        SegmentMembership[]
   incentiveRedemptions      IncentiveRedemption[]
   wallet                    Wallet?
@@ -1067,4 +1068,61 @@ model LoyaltyEvaluationSnapshot {
   loyaltyRatePercent Decimal  @db.Decimal(5, 2)
 
   @@index([computedAt])
+}
+
+/// یک رویداد/ایونت که برای آن یک لندینگ اختصاصی (بر اساس eventCode) ساخته می‌شود
+model Event {
+  id             String    @id @default(uuid()) @db.Uuid
+  /// کد یکتای ۸ کاراکتری تصادفی — بخشی از آدرس لندینگ عمومی رویداد
+  eventCode      String    @unique
+  name           String
+  startDate      DateTime  @db.Date
+  endDate        DateTime  @db.Date
+  isActive       Boolean   @default(true)
+  logoImageUrl   String?
+  bannerImageUrl String?
+  isDeleted      Boolean   @default(false)
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  styleGameSessions StyleGameSession[]
+
+  @@map("events")
+}
+
+enum StyleGameStatus {
+  AWAITING_ATTEMPT_1
+  AWAITING_ATTEMPT_2
+  COMPLETED
+}
+
+/// بازی «امتحان کردن استایل»: کاربر عکس می‌گذارد، یک محصول (فعلاً فقط گوشواره) انتخاب می‌کند،
+/// و هوش مصنوعی عکس ترکیبی تولید و ارزیابی می‌کند که آیا انتخاب مناسبی بوده یا نه
+model StyleGameSession {
+  id      String          @id @default(uuid()) @db.Uuid
+  userId  String          @db.Uuid
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventId String?         @db.Uuid
+  event   Event?          @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  photoUrl String
+  status  StyleGameStatus @default(AWAITING_ATTEMPT_1)
+
+  attempt1ProductId String? @db.Uuid
+  attempt1ImageUrl  String?
+  attempt1Score     Int?
+
+  /// دقیقاً دو آیدی محصول جایگزین — فقط وقتی attempt1Score زیر آستانه باشد پر می‌شود
+  suggestedProductIds String[] @default([])
+
+  attempt2ProductId String? @db.Uuid
+  attempt2ImageUrl  String?
+  attempt2Score     Int?
+
+  passed Boolean?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }

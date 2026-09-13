@@ -200,6 +200,91 @@ export class AdminSalesReportController {
     };
   }
 
+  @Get('combined-summary')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'خلاصه فروش کل (سایت + حضوری/اینستا)' })
+  async combinedSummary(
+    @Req() req: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    this.assertCanView(req);
+    const { start, end } = this.getRange(from, to);
+
+    const where = {
+      isDeleted: false,
+      paymentStatus: 'PAID' as const,
+      paidAt: { gte: start, lte: end },
+    };
+
+    const [orderAgg, itemAgg, costRows, packagingCost, offlineAgg] =
+      await Promise.all([
+        this.prisma.order.aggregate({
+          where,
+          _count: { id: true },
+          _sum: { shippingCost: true, payableAmount: true },
+        }),
+        this.prisma.orderItem.aggregate({
+          where: { isDeleted: false, order: where },
+          _sum: { quantity: true },
+        }),
+        this.prisma.$queryRaw<Array<{ cost_of_goods: Prisma.Decimal }>>(Prisma.sql`
+          SELECT COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods
+          FROM "OrderItem" oi
+          INNER JOIN "Order" o ON o.id = oi."orderId"
+          INNER JOIN "Product" p ON p.id = oi."productId"
+          WHERE
+            oi."isDeleted" = false
+            AND o."isDeleted" = false
+            AND o."paymentStatus" = 'PAID'
+            AND o."paidAt" IS NOT NULL
+            AND o."paidAt" >= ${start}
+            AND o."paidAt" <= ${end}
+        `),
+        this.getPackagingCost(),
+        this.prisma.offlineSale.aggregate({
+          where: { isDeleted: false, soldAt: { gte: start, lte: end } },
+          _count: { id: true },
+          _sum: { payableAmount: true, netAmount: true, costOfGoods: true },
+        }),
+      ]);
+
+    const onlinePayable = Number(orderAgg._sum.payableAmount ?? 0);
+    const onlineQuantity = itemAgg._sum.quantity ?? 0;
+    const onlineNetProfit = this.computeNetProfit({
+      payableAmount: onlinePayable,
+      shippingCost: Number(orderAgg._sum.shippingCost ?? 0),
+      costOfGoods: Number(costRows[0]?.cost_of_goods ?? 0),
+      quantity: onlineQuantity,
+      packagingCost,
+    });
+
+    const offlinePayable = Number(offlineAgg._sum.payableAmount ?? 0);
+    const offlineNetProfit =
+      Number(offlineAgg._sum.netAmount ?? 0) -
+      Number(offlineAgg._sum.costOfGoods ?? 0);
+
+    return {
+      range: { from: start.toISOString(), to: end.toISOString() },
+      online: {
+        count: orderAgg._count.id ?? 0,
+        payableAmount: this.money(onlinePayable),
+        netProfit: this.money(onlineNetProfit),
+      },
+      offline: {
+        count: offlineAgg._count.id ?? 0,
+        payableAmount: this.money(offlinePayable),
+        netProfit: this.money(offlineNetProfit),
+      },
+      total: {
+        count: (orderAgg._count.id ?? 0) + (offlineAgg._count.id ?? 0),
+        payableAmount: this.money(onlinePayable + offlinePayable),
+        netProfit: this.money(onlineNetProfit + offlineNetProfit),
+      },
+    };
+  }
+
   @Get('daily')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
