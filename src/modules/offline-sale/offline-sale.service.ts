@@ -139,6 +139,20 @@ export class OfflineSaleService {
     });
   }
 
+  async updateSoldAt(id: string, soldAt: string) {
+    const sale = await this.prisma.offlineSale.findFirst({
+      where: { id, isDeleted: false },
+    });
+    if (!sale) {
+      throw new BadRequestException('فروش پیدا نشد');
+    }
+    return this.prisma.offlineSale.update({
+      where: { id },
+      data: { soldAt: new Date(soldAt) },
+      include: { items: true },
+    });
+  }
+
   async remove(id: string) {
     return this.prisma.$transaction(async (tx) => {
       const sale = await tx.offlineSale.findFirst({
