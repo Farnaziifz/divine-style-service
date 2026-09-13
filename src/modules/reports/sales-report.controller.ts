@@ -399,6 +399,108 @@ export class AdminSalesReportController {
     return { year: jy, month: jm, monthName: JALALI_MONTH_NAMES[jm - 1], monthLength, data };
   }
 
+  @Get('combined-daily-jalali')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'فروش روزانه در یک ماه شمسی (سایت + حضوری/اینستا)' })
+  async combinedDailyJalali(
+    @Req() req: any,
+    @Query('year') yearParam?: string,
+    @Query('month') monthParam?: string,
+  ) {
+    this.assertCanView(req);
+    const nowJalali = toJalaali(new Date());
+    const jy = yearParam ? Number(yearParam) : nowJalali.jy;
+    const jm = monthParam ? Number(monthParam) : nowJalali.jm;
+    if (!Number.isInteger(jy) || !Number.isInteger(jm) || jm < 1 || jm > 12) {
+      throw new BadRequestException('سال یا ماه نامعتبر است');
+    }
+
+    const monthLength = jalaaliMonthLength(jy, jm);
+    const { start, end } = this.jalaaliMonthRange(jy, jm);
+
+    const [onlineRows, offlineRows] = await Promise.all([
+      this.prisma.$queryRaw<
+        Array<{ day: string; orders_count: bigint; payable_amount: Prisma.Decimal }>
+      >(Prisma.sql`
+        SELECT
+          to_char(date_trunc('day', ("paidAt" AT TIME ZONE 'Asia/Tehran')), 'YYYY-MM-DD') AS day,
+          COUNT(*)::bigint AS orders_count,
+          COALESCE(SUM("payableAmount"), 0)::numeric AS payable_amount
+        FROM "Order"
+        WHERE
+          "isDeleted" = false
+          AND "paymentStatus" = 'PAID'
+          AND "paidAt" IS NOT NULL
+          AND "paidAt" >= ${start}
+          AND "paidAt" < ${end}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `),
+      this.prisma.$queryRaw<
+        Array<{ day: string; sales_count: bigint; payable_amount: Prisma.Decimal }>
+      >(Prisma.sql`
+        SELECT
+          to_char(date_trunc('day', ("soldAt" AT TIME ZONE 'Asia/Tehran')), 'YYYY-MM-DD') AS day,
+          COUNT(*)::bigint AS sales_count,
+          COALESCE(SUM("payableAmount"), 0)::numeric AS payable_amount
+        FROM "OfflineSale"
+        WHERE
+          "isDeleted" = false
+          AND "soldAt" >= ${start}
+          AND "soldAt" < ${end}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `),
+    ]);
+
+    const byJalaliDay = new Map<
+      number,
+      { ordersCount: number; onlinePayableAmount: number; salesCount: number; offlinePayableAmount: number }
+    >();
+    const getEntry = (day: number) => {
+      let entry = byJalaliDay.get(day);
+      if (!entry) {
+        entry = { ordersCount: 0, onlinePayableAmount: 0, salesCount: 0, offlinePayableAmount: 0 };
+        byJalaliDay.set(day, entry);
+      }
+      return entry;
+    };
+    for (const r of onlineRows) {
+      const [gy, gm, gd] = r.day.split('-').map(Number);
+      const j = toJalaali(gy, gm, gd);
+      if (j.jy === jy && j.jm === jm) {
+        const entry = getEntry(j.jd);
+        entry.ordersCount = Number(r.orders_count);
+        entry.onlinePayableAmount = Number(r.payable_amount);
+      }
+    }
+    for (const r of offlineRows) {
+      const [gy, gm, gd] = r.day.split('-').map(Number);
+      const j = toJalaali(gy, gm, gd);
+      if (j.jy === jy && j.jm === jm) {
+        const entry = getEntry(j.jd);
+        entry.salesCount = Number(r.sales_count);
+        entry.offlinePayableAmount = Number(r.payable_amount);
+      }
+    }
+
+    const data = Array.from({ length: monthLength }, (_, i) => {
+      const day = i + 1;
+      const entry = byJalaliDay.get(day);
+      return {
+        day,
+        ordersCount: entry?.ordersCount ?? 0,
+        salesCount: entry?.salesCount ?? 0,
+        onlinePayableAmount: entry?.onlinePayableAmount ?? 0,
+        offlinePayableAmount: entry?.offlinePayableAmount ?? 0,
+        payableAmount: (entry?.onlinePayableAmount ?? 0) + (entry?.offlinePayableAmount ?? 0),
+      };
+    });
+
+    return { year: jy, month: jm, monthName: JALALI_MONTH_NAMES[jm - 1], monthLength, data };
+  }
+
   @Get('monthly-jalali')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
