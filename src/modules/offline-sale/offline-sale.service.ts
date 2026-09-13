@@ -139,17 +139,110 @@ export class OfflineSaleService {
     });
   }
 
-  async updateSoldAt(id: string, soldAt: string) {
-    const sale = await this.prisma.offlineSale.findFirst({
-      where: { id, isDeleted: false },
+  async update(id: string, dto: CreateOfflineSaleDto) {
+    const variantIds = dto.items.map((i) => i.productVariantId);
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: variantIds }, isDeleted: false },
+      select: {
+        id: true,
+        sku: true,
+        productId: true,
+        product: { select: { id: true, title: true, costPrice: true, isDeleted: true } },
+      },
     });
-    if (!sale) {
-      throw new BadRequestException('فروش پیدا نشد');
+    const variantById = new Map(variants.map((v) => [v.id, v]));
+
+    for (const item of dto.items) {
+      const variant = variantById.get(item.productVariantId);
+      if (!variant || variant.product.isDeleted) {
+        throw new BadRequestException('محصول یا واریانت پیدا نشد');
+      }
+      if (variant.productId !== item.productId) {
+        throw new BadRequestException('واریانت متعلق به این محصول نیست');
+      }
     }
-    return this.prisma.offlineSale.update({
-      where: { id },
-      data: { soldAt: new Date(soldAt) },
-      include: { items: true },
+
+    const totalAmount = dto.items.reduce(
+      (sum, item) => sum + item.quantity * item.unitPrice,
+      0,
+    );
+    const discountAmount = dto.discountAmount ?? 0;
+    if (discountAmount > totalAmount) {
+      throw new BadRequestException('مبلغ تخفیف نمی‌تواند بیشتر از جمع فروش باشد');
+    }
+    const payableAmount = totalAmount - discountAmount;
+    const commissionPercent = dto.commissionPercent ?? null;
+    const commissionAmount = commissionPercent
+      ? (payableAmount * commissionPercent) / 100
+      : 0;
+    const netAmount = payableAmount - commissionAmount;
+    const costOfGoods = dto.items.reduce((sum, item) => {
+      const variant = variantById.get(item.productVariantId)!;
+      return sum + item.quantity * Number(variant.product.costPrice);
+    }, 0);
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.offlineSale.findFirst({
+        where: { id, isDeleted: false },
+        include: { items: true },
+      });
+      if (!existing) {
+        throw new BadRequestException('فروش پیدا نشد');
+      }
+
+      for (const item of existing.items) {
+        await tx.productVariant.updateMany({
+          where: { id: item.productVariantId, isDeleted: false },
+          data: { stock: { increment: item.quantity } },
+        });
+      }
+
+      for (const item of dto.items) {
+        const reserved = await tx.productVariant.updateMany({
+          where: {
+            id: item.productVariantId,
+            isDeleted: false,
+            stock: { gte: item.quantity },
+          },
+          data: { stock: { decrement: item.quantity } },
+        });
+        if (reserved.count === 0) {
+          const variant = variantById.get(item.productVariantId)!;
+          throw new BadRequestException(`موجودی کافی نیست: ${variant.sku}`);
+        }
+      }
+
+      return tx.offlineSale.update({
+        where: { id },
+        data: {
+          channel: dto.channel.trim(),
+          commissionPercent,
+          discountAmount,
+          totalAmount,
+          commissionAmount,
+          payableAmount,
+          netAmount,
+          costOfGoods,
+          note: dto.note?.trim() || null,
+          soldAt: dto.soldAt ? new Date(dto.soldAt) : existing.soldAt,
+          items: {
+            deleteMany: {},
+            create: dto.items.map((item) => {
+              const variant = variantById.get(item.productVariantId)!;
+              return {
+                productId: item.productId,
+                productVariantId: item.productVariantId,
+                sku: variant.sku,
+                title: variant.product.title,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                unitCostPrice: Number(variant.product.costPrice),
+              };
+            }),
+          },
+        },
+        include: { items: true },
+      });
     });
   }
 

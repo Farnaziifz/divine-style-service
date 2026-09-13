@@ -16,7 +16,6 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { PaginationDto } from '../shared/dtos/pagination.dto';
 import { CreateOfflineSaleDto } from './dtos/create-offline-sale.dto';
-import { UpdateOfflineSaleDateDto } from './dtos/update-offline-sale-date.dto';
 import { OfflineSaleService } from './offline-sale.service';
 
 @ApiTags('Admin Offline Sales')
@@ -99,19 +98,15 @@ export class OfflineSaleController {
     return sale;
   }
 
-  @Patch(':id/date')
+  @Patch(':id')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update sold date of an offline sale (for backfilling old records)' })
-  async updateDate(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Body() dto: UpdateOfflineSaleDateDto,
-  ) {
+  @ApiOperation({ summary: 'Update an offline sale (channel, discount, commission, note, date, items)' })
+  async update(@Req() req: any, @Param('id') id: string, @Body() dto: CreateOfflineSaleDto) {
     if (!this.canWrite(req.user)) {
       throw new ForbiddenException();
     }
-    return this.offlineSaleService.updateSoldAt(id, dto.soldAt);
+    return this.offlineSaleService.update(id, dto);
   }
 
   @Delete(':id')
