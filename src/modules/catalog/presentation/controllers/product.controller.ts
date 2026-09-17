@@ -10,6 +10,7 @@ import {
   Query,
   Req,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
@@ -18,6 +19,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { JwtService } from '@nestjs/jwt';
 import { CreateProductDto } from '../dtos/create-product.dto';
 import { UpdateProductDto } from '../dtos/update-product.dto';
+import { UpdateVariantStockDto } from '../dtos/update-variant-stock.dto';
 import { ProductFilterDto } from '../dtos/product-filter.dto';
 import { CreateProductCommand } from '../../application/commands/create-product.command';
 import { UpdateProductCommand } from '../../application/commands/update-product.command';
@@ -157,5 +159,30 @@ export class ProductController {
   remove(@Param('id') id: string, @Req() req: any) {
     this.assertCanWrite(req);
     return this.commandBus.execute(new DeleteProductCommand(id));
+  }
+
+  // مسیر جدا برای ویرایش موجودی یک واریانت، بدون درگیر شدن با منطق reconcile
+  // آپدیت کامل محصول (که واریانت‌های ارسال‌نشده رو soft-delete می‌کنه)
+  @Patch(':productId/variants/:variantId/stock')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update a single variant stock (admin)' })
+  async updateVariantStock(
+    @Req() req: any,
+    @Param('productId') productId: string,
+    @Param('variantId') variantId: string,
+    @Body() dto: UpdateVariantStockDto,
+  ) {
+    this.assertCanWrite(req);
+    const variant = await this.prisma.productVariant.findFirst({
+      where: { id: variantId, productId, isDeleted: false },
+    });
+    if (!variant) {
+      throw new NotFoundException('واریانت یافت نشد');
+    }
+    return this.prisma.productVariant.update({
+      where: { id: variantId },
+      data: { stock: dto.stock },
+    });
   }
 }
