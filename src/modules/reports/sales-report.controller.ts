@@ -606,6 +606,340 @@ export class AdminSalesReportController {
     };
   }
 
+  /** مجموع فروش و سود سایت + حضوری/اینستا در بازهٔ [start, end). */
+  private async monthTotals(start: Date, end: Date, packagingCost: number) {
+    const where = {
+      isDeleted: false,
+      paymentStatus: 'PAID' as const,
+      paidAt: { gte: start, lt: end },
+    };
+
+    const [orderAgg, itemAgg, costRows, offlineAgg] = await Promise.all([
+      this.prisma.order.aggregate({
+        where,
+        _count: { id: true },
+        _sum: {
+          totalAmount: true,
+          discountAmount: true,
+          shippingCost: true,
+          payableAmount: true,
+        },
+      }),
+      this.prisma.orderItem.aggregate({
+        where: { isDeleted: false, order: where },
+        _sum: { quantity: true },
+      }),
+      this.prisma.$queryRaw<Array<{ cost_of_goods: Prisma.Decimal }>>(Prisma.sql`
+        SELECT COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods
+        FROM "OrderItem" oi
+        INNER JOIN "Order" o ON o.id = oi."orderId"
+        INNER JOIN "Product" p ON p.id = oi."productId"
+        WHERE
+          oi."isDeleted" = false
+          AND o."isDeleted" = false
+          AND o."paymentStatus" = 'PAID'
+          AND o."paidAt" IS NOT NULL
+          AND o."paidAt" >= ${start}
+          AND o."paidAt" < ${end}
+      `),
+      this.prisma.offlineSale.aggregate({
+        where: { isDeleted: false, soldAt: { gte: start, lt: end } },
+        _count: { id: true },
+        _sum: {
+          totalAmount: true,
+          discountAmount: true,
+          commissionAmount: true,
+          payableAmount: true,
+          netAmount: true,
+          costOfGoods: true,
+        },
+      }),
+    ]);
+
+    const ordersCount = orderAgg._count.id ?? 0;
+    const itemsCount = itemAgg._sum.quantity ?? 0;
+    const onlinePayable = Number(orderAgg._sum.payableAmount ?? 0);
+    const onlineCost = Number(costRows[0]?.cost_of_goods ?? 0);
+    const onlineShipping = Number(orderAgg._sum.shippingCost ?? 0);
+    const onlinePackaging = packagingCost * itemsCount;
+    const onlineNetProfit = this.computeNetProfit({
+      payableAmount: onlinePayable,
+      shippingCost: onlineShipping,
+      costOfGoods: onlineCost,
+      quantity: itemsCount,
+      packagingCost,
+    });
+
+    const salesCount = offlineAgg._count.id ?? 0;
+    const offlinePayable = Number(offlineAgg._sum.payableAmount ?? 0);
+    const offlineCost = Number(offlineAgg._sum.costOfGoods ?? 0);
+    const offlineNetAmount = Number(offlineAgg._sum.netAmount ?? 0);
+    const offlineNetProfit = offlineNetAmount - offlineCost;
+
+    return {
+      online: {
+        ordersCount,
+        itemsCount,
+        totalAmount: Number(orderAgg._sum.totalAmount ?? 0),
+        discountAmount: Number(orderAgg._sum.discountAmount ?? 0),
+        shippingCost: onlineShipping,
+        payableAmount: onlinePayable,
+        averageOrderValue: ordersCount > 0 ? onlinePayable / ordersCount : 0,
+        costOfGoods: onlineCost,
+        packagingCost: onlinePackaging,
+        netProfit: onlineNetProfit,
+      },
+      offline: {
+        salesCount,
+        totalAmount: Number(offlineAgg._sum.totalAmount ?? 0),
+        discountAmount: Number(offlineAgg._sum.discountAmount ?? 0),
+        commissionAmount: Number(offlineAgg._sum.commissionAmount ?? 0),
+        payableAmount: offlinePayable,
+        netAmount: offlineNetAmount,
+        costOfGoods: offlineCost,
+        netProfit: offlineNetProfit,
+      },
+      total: {
+        count: ordersCount + salesCount,
+        payableAmount: onlinePayable + offlinePayable,
+        costOfGoods: onlineCost + offlineCost,
+        netProfit: onlineNetProfit + offlineNetProfit,
+      },
+    };
+  }
+
+  @Get('monthly-report')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'گزارش کامل فروش یک ماه شمسی (سایت + حضوری/اینستا): خلاصه، سود، روزانه، پرفروش‌ها',
+  })
+  async monthlyReport(
+    @Req() req: any,
+    @Query('year') yearParam?: string,
+    @Query('month') monthParam?: string,
+  ) {
+    this.assertCanView(req);
+    const nowJalali = toJalaali(new Date());
+    const jy = yearParam ? Number(yearParam) : nowJalali.jy;
+    const jm = monthParam ? Number(monthParam) : nowJalali.jm;
+    if (!Number.isInteger(jy) || !Number.isInteger(jm) || jm < 1 || jm > 12) {
+      throw new BadRequestException('سال یا ماه نامعتبر است');
+    }
+
+    const monthLength = jalaaliMonthLength(jy, jm);
+    const { start, end } = this.jalaaliMonthRange(jy, jm);
+    const prevJy = jm === 1 ? jy - 1 : jy;
+    const prevJm = jm === 1 ? 12 : jm - 1;
+    const { start: prevStart, end: prevEnd } = this.jalaaliMonthRange(prevJy, prevJm);
+
+    const packagingCost = await this.getPackagingCost();
+
+    const [
+      totals,
+      prevTotals,
+      onlineDailyRows,
+      onlineItemDailyRows,
+      offlineDailyRows,
+      topProductRows,
+      channelRows,
+    ] = await Promise.all([
+      this.monthTotals(start, end, packagingCost),
+      this.monthTotals(prevStart, prevEnd, packagingCost),
+      this.prisma.$queryRaw<
+        Array<{
+          day: string;
+          orders_count: bigint;
+          payable_amount: Prisma.Decimal;
+          shipping_cost: Prisma.Decimal;
+        }>
+      >(Prisma.sql`
+        SELECT
+          to_char(date_trunc('day', ("paidAt" AT TIME ZONE 'Asia/Tehran')), 'YYYY-MM-DD') AS day,
+          COUNT(*)::bigint AS orders_count,
+          COALESCE(SUM("payableAmount"), 0)::numeric AS payable_amount,
+          COALESCE(SUM("shippingCost"), 0)::numeric AS shipping_cost
+        FROM "Order"
+        WHERE
+          "isDeleted" = false
+          AND "paymentStatus" = 'PAID'
+          AND "paidAt" IS NOT NULL
+          AND "paidAt" >= ${start}
+          AND "paidAt" < ${end}
+        GROUP BY 1
+      `),
+      this.prisma.$queryRaw<
+        Array<{ day: string; quantity: bigint; cost_of_goods: Prisma.Decimal }>
+      >(Prisma.sql`
+        SELECT
+          to_char(date_trunc('day', (o."paidAt" AT TIME ZONE 'Asia/Tehran')), 'YYYY-MM-DD') AS day,
+          COALESCE(SUM(oi."quantity"), 0)::bigint AS quantity,
+          COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods
+        FROM "OrderItem" oi
+        INNER JOIN "Order" o ON o.id = oi."orderId"
+        INNER JOIN "Product" p ON p.id = oi."productId"
+        WHERE
+          oi."isDeleted" = false
+          AND o."isDeleted" = false
+          AND o."paymentStatus" = 'PAID'
+          AND o."paidAt" IS NOT NULL
+          AND o."paidAt" >= ${start}
+          AND o."paidAt" < ${end}
+        GROUP BY 1
+      `),
+      this.prisma.$queryRaw<
+        Array<{
+          day: string;
+          sales_count: bigint;
+          payable_amount: Prisma.Decimal;
+          net_amount: Prisma.Decimal;
+          cost_of_goods: Prisma.Decimal;
+        }>
+      >(Prisma.sql`
+        SELECT
+          to_char(date_trunc('day', ("soldAt" AT TIME ZONE 'Asia/Tehran')), 'YYYY-MM-DD') AS day,
+          COUNT(*)::bigint AS sales_count,
+          COALESCE(SUM("payableAmount"), 0)::numeric AS payable_amount,
+          COALESCE(SUM("netAmount"), 0)::numeric AS net_amount,
+          COALESCE(SUM("costOfGoods"), 0)::numeric AS cost_of_goods
+        FROM "OfflineSale"
+        WHERE
+          "isDeleted" = false
+          AND "soldAt" >= ${start}
+          AND "soldAt" < ${end}
+        GROUP BY 1
+      `),
+      this.prisma.$queryRaw<
+        Array<{
+          product_id: string;
+          title: string;
+          quantity: bigint;
+          revenue: Prisma.Decimal;
+          cost_of_goods: Prisma.Decimal;
+          orders_count: bigint;
+        }>
+      >(Prisma.sql`
+        SELECT
+          oi."productId" AS product_id,
+          MAX(oi."title") AS title,
+          COALESCE(SUM(oi."quantity"), 0)::bigint AS quantity,
+          COALESCE(SUM((COALESCE(oi."unitDiscountPrice", oi."unitPrice")) * oi."quantity"), 0)::numeric AS revenue,
+          COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods,
+          COUNT(DISTINCT oi."orderId")::bigint AS orders_count
+        FROM "OrderItem" oi
+        INNER JOIN "Order" o ON o.id = oi."orderId"
+        INNER JOIN "Product" p ON p.id = oi."productId"
+        WHERE
+          oi."isDeleted" = false
+          AND o."isDeleted" = false
+          AND o."paymentStatus" = 'PAID'
+          AND o."paidAt" IS NOT NULL
+          AND o."paidAt" >= ${start}
+          AND o."paidAt" < ${end}
+        GROUP BY oi."productId"
+        ORDER BY revenue DESC
+        LIMIT 10
+      `),
+      this.prisma.offlineSale.groupBy({
+        by: ['channel'],
+        where: { isDeleted: false, soldAt: { gte: start, lt: end } },
+        _count: { id: true },
+        _sum: { payableAmount: true, netAmount: true, costOfGoods: true },
+        orderBy: { _sum: { payableAmount: 'desc' } },
+      }),
+    ]);
+
+    const toJalaliDay = (ymd: string) => {
+      const [gy, gm, gd] = ymd.split('-').map(Number);
+      const j = toJalaali(gy, gm, gd);
+      return j.jy === jy && j.jm === jm ? j.jd : null;
+    };
+
+    const days = Array.from({ length: monthLength }, (_, i) => ({
+      day: i + 1,
+      ordersCount: 0,
+      salesCount: 0,
+      onlinePayableAmount: 0,
+      offlinePayableAmount: 0,
+      payableAmount: 0,
+      onlineNetProfit: 0,
+      offlineNetProfit: 0,
+      netProfit: 0,
+    }));
+    const onlineShippingByDay = new Map<number, number>();
+    const onlineCostByDay = new Map<number, number>();
+    const onlineQuantityByDay = new Map<number, number>();
+
+    for (const r of onlineDailyRows) {
+      const d = toJalaliDay(r.day);
+      if (d == null) continue;
+      days[d - 1].ordersCount = Number(r.orders_count);
+      days[d - 1].onlinePayableAmount = Number(r.payable_amount);
+      onlineShippingByDay.set(d, Number(r.shipping_cost));
+    }
+    for (const r of onlineItemDailyRows) {
+      const d = toJalaliDay(r.day);
+      if (d == null) continue;
+      onlineQuantityByDay.set(d, Number(r.quantity));
+      onlineCostByDay.set(d, Number(r.cost_of_goods));
+    }
+    for (const r of offlineDailyRows) {
+      const d = toJalaliDay(r.day);
+      if (d == null) continue;
+      days[d - 1].salesCount = Number(r.sales_count);
+      days[d - 1].offlinePayableAmount = Number(r.payable_amount);
+      days[d - 1].offlineNetProfit = Number(r.net_amount) - Number(r.cost_of_goods);
+    }
+    for (const entry of days) {
+      entry.onlineNetProfit = this.computeNetProfit({
+        payableAmount: entry.onlinePayableAmount,
+        shippingCost: onlineShippingByDay.get(entry.day) ?? 0,
+        costOfGoods: onlineCostByDay.get(entry.day) ?? 0,
+        quantity: onlineQuantityByDay.get(entry.day) ?? 0,
+        packagingCost,
+      });
+      entry.payableAmount = entry.onlinePayableAmount + entry.offlinePayableAmount;
+      entry.netProfit = entry.onlineNetProfit + entry.offlineNetProfit;
+    }
+
+    return {
+      year: jy,
+      month: jm,
+      monthName: JALALI_MONTH_NAMES[jm - 1],
+      monthLength,
+      range: { from: start.toISOString(), to: end.toISOString() },
+      ...totals,
+      previous: {
+        year: prevJy,
+        month: prevJm,
+        monthName: JALALI_MONTH_NAMES[prevJm - 1],
+        count: prevTotals.total.count,
+        payableAmount: prevTotals.total.payableAmount,
+        netProfit: prevTotals.total.netProfit,
+      },
+      daily: days,
+      topProducts: topProductRows.map((r) => {
+        const revenue = Number(r.revenue);
+        const costOfGoods = Number(r.cost_of_goods);
+        return {
+          productId: r.product_id,
+          title: r.title,
+          quantity: Number(r.quantity),
+          ordersCount: Number(r.orders_count),
+          revenue,
+          costOfGoods,
+          grossProfit: revenue - costOfGoods,
+        };
+      }),
+      offlineChannels: channelRows.map((r) => ({
+        channel: r.channel,
+        salesCount: r._count.id,
+        payableAmount: Number(r._sum.payableAmount ?? 0),
+        netProfit: Number(r._sum.netAmount ?? 0) - Number(r._sum.costOfGoods ?? 0),
+      })),
+    };
+  }
+
   @Get('detail')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
