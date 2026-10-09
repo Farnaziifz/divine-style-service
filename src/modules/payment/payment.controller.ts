@@ -21,6 +21,7 @@ import { SmsTextService } from '../shared/sms/sms-text.service';
 import { CashbackGrantService } from '../loyalty/cashback-incentive/cashback-grant.service';
 import { CouponTriggerService } from '../loyalty/coupon-incentive/coupon-trigger.service';
 import { ReferralCashbackService } from '../referral/referral-cashback.service';
+import { countWelcomeTierPurchases } from '../discount/welcome-tier.count';
 import { welcomeTierForPriorPaidCount } from '../discount/welcome-tier.rules';
 
 @ApiTags('Payment')
@@ -161,9 +162,7 @@ export class PaymentController {
   ): Promise<void> {
     if (!customerMobile) return;
     try {
-      const paidCount = await this.prisma.order.count({
-        where: { userId, paymentStatus: 'PAID', isDeleted: false },
-      });
+      const paidCount = await countWelcomeTierPurchases(this.prisma, userId);
       const nextTier = welcomeTierForPriorPaidCount(paidCount);
       if (!nextTier) return;
       const text = this.smsText.buildNextWelcomeStageText(

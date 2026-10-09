@@ -44,7 +44,8 @@ model User {
   walletWithdrawalRequests  WalletWithdrawalRequest[]
   directConversation        DirectConversation?
   directMessages            DirectMessage[]            @relation("DirectMessageAuthor")
-  offlineSales              OfflineSale[]
+  offlineSales              OfflineSale[]              @relation("OfflineSaleCreatedBy")
+  purchasedOfflineSales     OfflineSale[]              @relation("OfflineSaleCustomer")
   createdAt                 DateTime                   @default(now())
   updatedAt                 DateTime                   @updatedAt
   isDeleted                 Boolean                    @default(false)
@@ -363,9 +364,9 @@ model Product {
   code             Int      @unique // کد خودکار محصول (بر اساس بازهٔ کد دسته‌بندی)
   costPrice        Decimal  @db.Decimal(12, 2) // بهای تمام‌شدهٔ خالص (ورودی ادمین)
   profitMultiplier Decimal  @default(1) @db.Decimal(6, 2) // ضریب سود این محصول (قبلاً از دسته‌بندی می‌آمد، الان مستقل و مخصوص خود محصول است)
-  finalPrice      Decimal  @db.Decimal(12, 2) // قیمت نهایی محاسبه‌شده از فرمول
-  discountPrice   Decimal? @db.Decimal(12, 2) // تخفیف دستی روی finalPrice (اختیاری)
-  discountPercent Int? // درصد تخفیف دستی (اختیاری)
+  finalPrice       Decimal  @db.Decimal(12, 2) // قیمت نهایی محاسبه‌شده از فرمول
+  discountPrice    Decimal? @db.Decimal(12, 2) // تخفیف دستی روی finalPrice (اختیاری)
+  discountPercent  Int? // درصد تخفیف دستی (اختیاری)
 
   // Specifications (JSON with validation against SpecificationKey)
   // Format: { "material": "Cotton", "care": "Hand wash" }
@@ -694,7 +695,9 @@ model OfflineSale {
   note              String?
   soldAt            DateTime          @default(now())
   createdByUserId   String?           @db.Uuid
-  createdByUser     User?             @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByUser     User?             @relation("OfflineSaleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  customerId        String?           @db.Uuid // خریدار (حساب کاربری) — برای شمارش پلهٔ تخفیف خوش‌آمدگویی
+  customer          User?             @relation("OfflineSaleCustomer", fields: [customerId], references: [id], onDelete: SetNull)
   items             OfflineSaleItem[]
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
@@ -702,6 +705,7 @@ model OfflineSale {
   deletedAt         DateTime?
 
   @@index([isDeleted, soldAt])
+  @@index([customerId])
 }
 
 model OfflineSaleItem {
@@ -1100,13 +1104,13 @@ enum StyleGameStatus {
 /// بازی «امتحان کردن استایل»: کاربر عکس می‌گذارد، یک محصول (فعلاً فقط گوشواره) انتخاب می‌کند،
 /// و هوش مصنوعی عکس ترکیبی تولید و ارزیابی می‌کند که آیا انتخاب مناسبی بوده یا نه
 model StyleGameSession {
-  id      String          @id @default(uuid()) @db.Uuid
-  userId  String          @db.Uuid
-  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  eventId String?         @db.Uuid
-  event   Event?          @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  id       String          @id @default(uuid()) @db.Uuid
+  userId   String          @db.Uuid
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventId  String?         @db.Uuid
+  event    Event?          @relation(fields: [eventId], references: [id], onDelete: SetNull)
   photoUrl String
-  status  StyleGameStatus @default(AWAITING_ATTEMPT_1)
+  status   StyleGameStatus @default(AWAITING_ATTEMPT_1)
 
   attempt1ProductId String? @db.Uuid
   attempt1ImageUrl  String?

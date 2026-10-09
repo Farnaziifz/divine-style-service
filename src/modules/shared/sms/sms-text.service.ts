@@ -152,6 +152,38 @@ export class SmsTextService {
     );
   }
 
+  buildOfflinePurchaseThanksText(params: {
+    name?: string | null;
+    /** این خرید چندمین خرید مشتری است (۱ = اولین خرید) */
+    purchaseNumber: number;
+    isNewAccount: boolean;
+    /** پلهٔ تخفیف خرید بعدی؛ null یعنی پله‌ها تمام شده */
+    nextTier: { value: number; label: string } | null;
+  }): string {
+    const ordinals = ['اولین', 'دومین', 'سومین'];
+    const ordinal = ordinals[params.purchaseNumber - 1];
+    const greeting = params.name?.trim() ? `${params.name.trim()} عزیز 💛` : 'مشتری عزیز 💛';
+    const lines = [
+      greeting,
+      ordinal
+        ? `ممنون که ${ordinal} خریدت رو از دیواین استایل انجام دادی! ✨`
+        : 'ممنون که دوباره از دیواین استایل خرید کردی! ✨',
+      'امیدواریم از انتخابت کلی کیف کنی 🛍️🥰',
+    ];
+    if (params.isNewAccount) {
+      lines.push(
+        '🎁 توی سایت دیواین استایل هم برات حساب کاربری ساختیم؛ فقط با همین شماره موبایل وارد شو.',
+      );
+    }
+    if (params.nextTier) {
+      lines.push(
+        `🎉 ${params.nextTier.value}٪ تخفیف ${params.nextTier.label}ت توی سایت، بدون نیاز به کد و خودکار اعمال میشه.`,
+      );
+    }
+    lines.push('دیواین استایل');
+    return lines.join('\n');
+  }
+
   buildNextWelcomeStageText(percent: number, label: string): string {
     return (
       `🎉 تبریک! پلهٔ بعدی تخفیف شما فعال شد\n` +

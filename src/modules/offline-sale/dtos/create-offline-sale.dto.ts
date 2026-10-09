@@ -3,11 +3,13 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
   Min,
   ValidateNested,
@@ -39,6 +41,30 @@ export class CreateOfflineSaleDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @ApiPropertyOptional({
+    example: '09123456789',
+    description:
+      'موبایل خریدار؛ اگر حساب نداشته باشد ساخته می‌شود و پیامک تشکر برایش ارسال می‌شود',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^09\d{9}$/, {
+    message: 'شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود',
+  })
+  customerMobile?: string;
+
+  @ApiPropertyOptional({ description: 'نام خریدار (برای حساب جدید و متن پیامک)' })
+  @IsOptional()
+  @IsString()
+  customerName?: string;
+
+  @ApiPropertyOptional({
+    description: 'ارسال پیامک تشکر به خریدار؛ پیش‌فرض true',
+  })
+  @IsOptional()
+  @IsBoolean()
+  sendSms?: boolean;
 
   @ApiPropertyOptional({ description: 'تاریخ فروش؛ پیش‌فرض اکنون' })
   @IsOptional()

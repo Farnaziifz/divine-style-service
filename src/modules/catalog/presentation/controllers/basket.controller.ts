@@ -31,6 +31,7 @@ import {
   calculateDiscountAmount,
   validateRedemption,
 } from '../../../loyalty/discount-incentive/discount-redemption.rules';
+import { countWelcomeTierPurchases } from '../../../discount/welcome-tier.count';
 import {
   formatWelcomeTierLabel,
   formatWelcomeTierMessage,
@@ -262,9 +263,7 @@ export class BasketController {
     userId: string,
     subtotalCents: number,
   ): Promise<{ amountCents: number; label: string; message: string } | null> {
-    const priorPaidCount = await client.order.count({
-      where: { userId, paymentStatus: 'PAID', isDeleted: false },
-    });
+    const priorPaidCount = await countWelcomeTierPurchases(client, userId);
     const tier = welcomeTierForPriorPaidCount(priorPaidCount);
     if (!tier) return null;
 

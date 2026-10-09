@@ -1,11 +1,76 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { countWelcomeTierPurchases } from '../discount/welcome-tier.count';
+import { welcomeTierForPriorPaidCount } from '../discount/welcome-tier.rules';
 import { PrismaService } from '../shared/prisma/prisma.service';
+import { SmsTextService } from '../shared/sms/sms-text.service';
 import { CreateOfflineSaleDto } from './dtos/create-offline-sale.dto';
 
 @Injectable()
 export class OfflineSaleService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(OfflineSaleService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly smsText: SmsTextService,
+  ) {}
+
+  /**
+   * خریدار حضوری/اینستا: اگر حساب ندارد ساخته می‌شود. فروش به حساب او وصل می‌شود
+   * و (برای پلهٔ تخفیف خوش‌آمدگویی) در شمارش خریدها لحاظ می‌شود.
+   * خطا در این مرحله نباید ثبت فروش را خراب کند.
+   */
+  private async resolveCustomer(mobile: string, name?: string) {
+    const trimmedName = name?.trim() || null;
+    try {
+      let user = await this.prisma.user.findUnique({ where: { mobile } });
+      if (user?.isDeleted) return null;
+
+      const isNewAccount = !user;
+      if (!user) {
+        user = await this.prisma.user.create({
+          data: { mobile, name: trimmedName },
+        });
+      } else if (!user.name && trimmedName) {
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { name: trimmedName },
+        });
+      }
+
+      const priorPurchases = await countWelcomeTierPurchases(this.prisma, user.id);
+      return { user, isNewAccount, priorPurchases };
+    } catch (err) {
+      this.logger.error(
+        `Offline sale customer lookup failed for ${mobile}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /** پیامک تشکر: می‌گوید این چندمین خرید بوده و تخفیف خرید بعدی چقدر است. */
+  private async sendThanksSms(customer: {
+    user: { mobile: string; name: string | null };
+    isNewAccount: boolean;
+    priorPurchases: number;
+  }) {
+    try {
+      const purchaseNumber = customer.priorPurchases + 1;
+      await this.smsText.send(
+        customer.user.mobile,
+        this.smsText.buildOfflinePurchaseThanksText({
+          name: customer.user.name,
+          purchaseNumber,
+          isNewAccount: customer.isNewAccount,
+          nextTier: welcomeTierForPriorPaidCount(purchaseNumber),
+        }),
+      );
+    } catch (err) {
+      this.logger.error(
+        `Offline sale thanks SMS failed for ${customer.user.mobile}: ${(err as Error).message}`,
+      );
+    }
+  }
 
   async create(dto: CreateOfflineSaleDto, createdByUserId?: string) {
     const variantIds = dto.items.map((i) => i.productVariantId);
@@ -49,7 +114,11 @@ export class OfflineSaleService {
       return sum + item.quantity * Number(variant.product.costPrice);
     }, 0);
 
-    return this.prisma.$transaction(async (tx) => {
+    const customer = dto.customerMobile
+      ? await this.resolveCustomer(dto.customerMobile, dto.customerName)
+      : null;
+
+    const sale = await this.prisma.$transaction(async (tx) => {
       for (const item of dto.items) {
         const reserved = await tx.productVariant.updateMany({
           where: {
@@ -78,6 +147,7 @@ export class OfflineSaleService {
           note: dto.note?.trim() || null,
           soldAt: dto.soldAt ? new Date(dto.soldAt) : new Date(),
           createdByUserId: createdByUserId ?? null,
+          customerId: customer?.user.id ?? null,
           items: {
             create: dto.items.map((item) => {
               const variant = variantById.get(item.productVariantId)!;
@@ -96,6 +166,19 @@ export class OfflineSaleService {
         include: { items: true },
       });
     });
+
+    if (customer && dto.sendSms !== false) await this.sendThanksSms(customer);
+    return {
+      ...sale,
+      customer: customer
+        ? {
+            mobile: customer.user.mobile,
+            name: customer.user.name,
+            isNewAccount: customer.isNewAccount,
+            purchaseNumber: customer.priorPurchases + 1,
+          }
+        : null,
+    };
   }
 
   async findAll(params: {
@@ -109,7 +192,14 @@ export class OfflineSaleService {
     const skip = (page - 1) * limit;
     const where: Prisma.OfflineSaleWhereInput = {
       isDeleted: false,
-      ...(search ? { channel: { contains: search, mode: 'insensitive' } } : {}),
+      ...(search
+        ? {
+            OR: [
+              { channel: { contains: search, mode: 'insensitive' } },
+              { customer: { mobile: { contains: search } } },
+            ],
+          }
+        : {}),
       ...(from || to
         ? { soldAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
         : {}),
@@ -122,7 +212,7 @@ export class OfflineSaleService {
         orderBy: { soldAt: 'desc' },
         skip,
         take: limit,
-        include: { items: true },
+        include: { items: true, customer: { select: { mobile: true, name: true } } },
       }),
     ]);
 
@@ -135,7 +225,7 @@ export class OfflineSaleService {
   async findOne(id: string) {
     return this.prisma.offlineSale.findFirst({
       where: { id, isDeleted: false },
-      include: { items: true },
+      include: { items: true, customer: { select: { mobile: true, name: true } } },
     });
   }
 
@@ -181,7 +271,15 @@ export class OfflineSaleService {
       return sum + item.quantity * Number(variant.product.costPrice);
     }, 0);
 
-    return this.prisma.$transaction(async (tx) => {
+    const customer = dto.customerMobile
+      ? await this.resolveCustomer(dto.customerMobile, dto.customerName)
+      : null;
+    if (dto.customerMobile && !customer) {
+      throw new BadRequestException('ساخت یا پیدا کردن حساب خریدار ممکن نشد');
+    }
+
+    let previousCustomerId: string | null = null;
+    const updated = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.offlineSale.findFirst({
         where: { id, isDeleted: false },
         include: { items: true },
@@ -189,6 +287,7 @@ export class OfflineSaleService {
       if (!existing) {
         throw new BadRequestException('فروش پیدا نشد');
       }
+      previousCustomerId = existing.customerId;
 
       for (const item of existing.items) {
         await tx.productVariant.updateMany({
@@ -225,6 +324,7 @@ export class OfflineSaleService {
           costOfGoods,
           note: dto.note?.trim() || null,
           soldAt: dto.soldAt ? new Date(dto.soldAt) : existing.soldAt,
+          customerId: customer?.user.id ?? null,
           items: {
             deleteMany: {},
             create: dto.items.map((item) => {
@@ -244,6 +344,23 @@ export class OfflineSaleService {
         include: { items: true },
       });
     });
+
+    // پیامک فقط وقتی می‌رود که فروش تازه به این خریدار وصل شده باشد.
+    const newlyLinked = !!customer && customer.user.id !== previousCustomerId;
+    if (customer && newlyLinked && dto.sendSms !== false) {
+      await this.sendThanksSms(customer);
+    }
+    return {
+      ...updated,
+      customer: customer
+        ? {
+            mobile: customer.user.mobile,
+            name: customer.user.name,
+            isNewAccount: customer.isNewAccount,
+            purchaseNumber: customer.priorPurchases + 1,
+          }
+        : null,
+    };
   }
 
   async remove(id: string) {
