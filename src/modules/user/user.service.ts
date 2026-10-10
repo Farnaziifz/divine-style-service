@@ -1,6 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
+import { CreateUserDto } from './dtos/create-user.dto';
 import { UpdateUserDto } from './dtos/update-user.dto';
 import { PaginatedResult } from '../shared/interfaces/paginated-result.interface';
 import { UpdateUserAccessDto } from './dtos/update-user-access.dto';
@@ -52,6 +57,29 @@ export class UserService {
     }
 
     // Exclude sensitive fields
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { password, hashedRefreshToken, ...result } = user;
+    return result;
+  }
+
+  /** ادمین: ساخت حساب کاربری عادی با شماره موبایل (بدون ارسال پیامک). */
+  async createByAdmin(dto: CreateUserDto) {
+    const existing = await this.prisma.user.findUnique({
+      where: { mobile: dto.mobile },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new ConflictException('کاربری با این شماره موبایل قبلاً ثبت شده است');
+    }
+
+    const user = await this.prisma.user.create({
+      data: {
+        mobile: dto.mobile,
+        name: dto.name?.trim() || null,
+        lastName: dto.lastName?.trim() || null,
+      },
+    });
+
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password, hashedRefreshToken, ...result } = user;
     return result;

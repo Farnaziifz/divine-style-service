@@ -13,6 +13,7 @@ import {
   Param,
 } from '@nestjs/common';
 import { UserService } from './user.service';
+import { CreateUserDto } from './dtos/create-user.dto';
 import { UpdateUserDto } from './dtos/update-user.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { UpdateUserAccessDto } from './dtos/update-user-access.dto';
@@ -125,6 +126,16 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'آدرس با موفقیت حذف شد' })
   deleteMyAddress(@Req() req: any, @Param('addressId') addressId: string) {
     return this.userService.deleteMyAddress(req.user.id, addressId);
+  }
+
+  @Post()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'ادمین: افزودن کاربر جدید با شماره موبایل' })
+  @ApiResponse({ status: 201, description: 'کاربر ساخته شد' })
+  create(@Req() req: any, @Body() dto: CreateUserDto) {
+    this.assertCanManageUsers(req);
+    return this.userService.createByAdmin(dto);
   }
 
   @Get('list')
