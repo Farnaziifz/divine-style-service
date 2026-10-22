@@ -109,6 +109,35 @@ export class BasketController {
     }
   }
 
+  private async hasFreeShipping(
+    client: Prisma.TransactionClient | PrismaService,
+    userId: string,
+  ): Promise<boolean> {
+    const grant = await client.freeShippingGrant.findFirst({
+      where: { userId, remainingUses: { gt: 0 } },
+      select: { id: true },
+    });
+    return !!grant;
+  }
+
+  /** یک واحد از ارسال رایگان کاربر را مصرف می‌کند؛ اگر چیزی نمانده باشد false برمی‌گرداند */
+  private async consumeFreeShipping(
+    tx: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<boolean> {
+    const grant = await tx.freeShippingGrant.findFirst({
+      where: { userId, remainingUses: { gt: 0 } },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!grant) return false;
+    const res = await tx.freeShippingGrant.updateMany({
+      where: { id: grant.id, remainingUses: { gt: 0 } },
+      data: { remainingUses: { decrement: 1 } },
+    });
+    return res.count > 0;
+  }
+
   private async getOrCreateActiveBasket(userId: string) {
     const existing = await this.prisma.tempBasket.findFirst({
       where: { userId, isDeleted: false },
@@ -497,6 +526,9 @@ export class BasketController {
       });
       if (!method) throw new BadRequestException('روش ارسال معتبر نیست');
       shippingCostCents = toCents(method.price ?? 0);
+      if (shippingCostCents > 0 && (await this.hasFreeShipping(this.prisma, userId))) {
+        shippingCostCents = 0;
+      }
     }
     const packagingCostCents = toCents(await this.pricingService.getPackagingCost());
     const discountCodeRaw = dto.discountCode?.trim();
@@ -790,6 +822,9 @@ export class BasketController {
         });
         if (!method) throw new BadRequestException('روش ارسال معتبر نیست');
         shippingCostCents = toCents(method.price ?? 0);
+        if (shippingCostCents > 0 && (await this.consumeFreeShipping(tx, userId))) {
+          shippingCostCents = 0;
+        }
         shippingMethodId = method.id;
         shippingMethodTitle = method.title;
         shippingMethodPrice = method.price ?? null;

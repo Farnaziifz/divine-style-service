@@ -184,6 +184,57 @@ export class SmsTextService {
     return lines.join('\n');
   }
 
+  buildEventPrizeText(params: {
+    prize:
+      | 'EVENT_CASHBACK_10'
+      | 'SITE_DISCOUNT_20'
+      | 'FREE_SHIPPING_3'
+      | 'WALLET_60K'
+      | 'WALLET_120K';
+    rewardAmount: number | null;
+    rewardCode: string | null;
+  }): string {
+    const amount = (params.rewardAmount ?? 0).toLocaleString('fa-IR');
+    const prizeLine = {
+      EVENT_CASHBACK_10: `۱۰٪ تخفیف ایونت: ${amount} تومان (۱۰٪ مبلغ خریدت) به کیف پول سایتت اضافه شد.`,
+      SITE_DISCOUNT_20: `۲۰٪ تخفیف سایت\nکد تخفیف: ${params.rewardCode ?? ''}\n(یک‌بارمصرف و ۳۰ روز اعتبار، مخصوص خودت)`,
+      FREE_SHIPPING_3: 'ارسال رایگان برای ۳ خرید بعدیت از سایت، بدون نیاز به کد و خودکار اعمال میشه.',
+      WALLET_60K: `${amount} تومان شارژ کیف پول سایتت اضافه شد.`,
+      WALLET_120K: `${amount} تومان شارژ کیف پول سایتت اضافه شد.`,
+    }[params.prize];
+    return (
+      `🎁 تبریک! جایزهٔ گردونهٔ دیواین استایل:\n` +
+      `${prizeLine}\n` +
+      `🌐 d-style.ir\n` +
+      `📸 اینستاگرام: @divinestyle.accessories\n` +
+      `دیواین استایل`
+    );
+  }
+
+  buildAdminEventPaymentText(params: {
+    eventName: string;
+    eventCode: string;
+    amount: number;
+    customerMobile: string;
+    refId: string | null;
+    paidAt: Date;
+  }): string {
+    const when = params.paidAt.toLocaleString('fa-IR', {
+      timeZone: 'Asia/Tehran',
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    return (
+      `💰 پرداخت جدید ایونت\n` +
+      `ایونت: ${params.eventName} (${params.eventCode})\n` +
+      `مبلغ: ${params.amount.toLocaleString('fa-IR')} تومان\n` +
+      `مشتری: ${params.customerMobile}\n` +
+      (params.refId ? `کد پیگیری: ${params.refId}\n` : '') +
+      `زمان: ${when}\n` +
+      `دیواین استایل`
+    );
+  }
+
   buildNextWelcomeStageText(percent: number, label: string): string {
     return (
       `🎉 تبریک! پلهٔ بعدی تخفیف شما فعال شد\n` +

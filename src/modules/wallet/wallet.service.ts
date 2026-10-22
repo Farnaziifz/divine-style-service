@@ -7,6 +7,7 @@ import {
 import { CreditLedgerReason, Prisma } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { PaymentService } from '../payment/payment.service';
+import { countWelcomeTierPurchases } from '../discount/welcome-tier.count';
 import { TopUpWalletDto } from './dtos/topup-wallet.dto';
 import { RequestWithdrawalDto } from './dtos/request-withdrawal.dto';
 import { ResolveWithdrawalDto } from './dtos/resolve-withdrawal.dto';
@@ -120,9 +121,8 @@ export class WalletService {
 
   async getMine(userId: string) {
     const [priorPaidCount, wallet, withdrawals] = await Promise.all([
-      this.prisma.order.count({
-        where: { userId, paymentStatus: 'PAID', isDeleted: false },
-      }),
+      // سفارش‌های سایت + خریدهای ثبت‌شده (حضوری/ایونت) — همه «خرید» حساب می‌شوند
+      countWelcomeTierPurchases(this.prisma, userId),
       this.prisma.wallet.findUnique({
         where: { userId },
         include: {

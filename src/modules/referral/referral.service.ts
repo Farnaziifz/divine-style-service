@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, ReferralCode } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
+import { countWelcomeTierPurchases } from '../discount/welcome-tier.count';
 import { CreateReferralCodeDto } from './dtos/create-referral-code.dto';
 import { CreateBloggerReferralCodeDto } from './dtos/create-blogger-referral-code.dto';
 import { UpdateReferralCodeDto } from './dtos/update-referral-code.dto';
@@ -64,9 +65,7 @@ export class ReferralService {
   async createForSelf(ownerId: string, dto: CreateReferralCodeDto) {
     this.assertPercentRules(dto.discountPercent, dto.cashbackPercent);
 
-    const priorPaidCount = await this.prisma.order.count({
-      where: { userId: ownerId, paymentStatus: 'PAID', isDeleted: false },
-    });
+    const priorPaidCount = await countWelcomeTierPurchases(this.prisma, ownerId);
     if (priorPaidCount === 0) {
       throw new BadRequestException(
         'برای ساخت کد ریفرال باید حداقل یک خرید موفق داشته باشید',
@@ -152,9 +151,7 @@ export class ReferralService {
         where: { ownerId, isDeleted: false },
         orderBy: { createdAt: 'desc' },
       }),
-      this.prisma.order.count({
-        where: { userId: ownerId, paymentStatus: 'PAID', isDeleted: false },
-      }),
+      countWelcomeTierPurchases(this.prisma, ownerId),
     ]);
     return {
       eligible: priorPaidCount > 0,
