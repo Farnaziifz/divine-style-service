@@ -6,6 +6,7 @@ import { SmsTextService } from '../shared/sms/sms-text.service';
 import { EventService } from './event.service';
 import { CreateEventPaymentDto } from './dtos/create-event-payment.dto';
 import { serializeSpin } from './event-spin.service';
+import { AssignEventPaymentItemsDto } from './dtos/assign-event-payment-items.dto';
 
 type ProviderName = 'ZARINPAL' | 'ZIBAL';
 
@@ -23,6 +24,37 @@ function parseProviders(raw: string | null | undefined): ProviderName[] {
     .map((x) => String(x).trim().toUpperCase())
     .filter((x): x is ProviderName => x === 'ZARINPAL' || x === 'ZIBAL');
   return normalized.length > 0 ? Array.from(new Set(normalized)) : fallback;
+}
+
+const ADMIN_PAYMENT_INCLUDE = {
+  user: { select: { mobile: true, name: true } },
+  offlineSale: { include: { items: { orderBy: { createdAt: 'asc' as const } } } },
+} satisfies Prisma.EventPaymentInclude;
+
+function serializeAdminPayment(
+  p: Prisma.EventPaymentGetPayload<{ include: typeof ADMIN_PAYMENT_INCLUDE }>,
+) {
+  // فروشِ حذف‌شده (از صفحهٔ فروش حضوری) یعنی اقلام برگشته‌اند و پرداخت دوباره تعیین تکلیف نشده است
+  const sale = p.offlineSale && !p.offlineSale.isDeleted ? p.offlineSale : null;
+  const items = (sale?.items ?? []).map((i) => ({
+    id: i.id,
+    productId: i.productId,
+    productVariantId: i.productVariantId,
+    sku: i.sku,
+    title: i.title,
+    quantity: i.quantity,
+    unitPrice: i.unitPrice.toNumber(),
+  }));
+  return {
+    id: p.id,
+    amount: p.amount.toNumber(),
+    refId: p.refId,
+    verifiedAt: p.verifiedAt,
+    createdAt: p.createdAt,
+    user: p.user,
+    items,
+    isAssigned: items.length > 0,
+  };
 }
 
 @Injectable()
@@ -246,6 +278,167 @@ export class EventPaymentService {
     return result
       ? `${landing}/${encodeURIComponent(result.eventCode)}/status/${result.id}`
       : landing;
+  }
+
+  /** لیست پرداخت‌های موفق یک ایونت برای ادمین، به‌همراه اقلام تعیین‌تکلیف‌شدهٔ هر پرداخت */
+  async listForEvent(eventId: string, params: { page: number; limit: number; unassignedOnly?: boolean }) {
+    await this.eventService.findOne(eventId);
+    const { page, limit, unassignedOnly } = params;
+
+    const where: Prisma.EventPaymentWhereInput = {
+      eventId,
+      status: 'PAID',
+      ...(unassignedOnly
+        ? { OR: [{ offlineSaleId: null }, { offlineSale: { is: { items: { none: {} } } } }] }
+        : {}),
+    };
+
+    const [total, payments] = await this.prisma.$transaction([
+      this.prisma.eventPayment.count({ where }),
+      this.prisma.eventPayment.findMany({
+        where,
+        orderBy: { verifiedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: ADMIN_PAYMENT_INCLUDE,
+      }),
+    ]);
+
+    const data = payments.map(serializeAdminPayment);
+
+    return { data, meta: { total, page, limit, lastPage: Math.ceil(total / limit) || 1 } };
+  }
+
+  /**
+   * تعیین تکلیف یک پرداخت: اقلام را روی فروشِ همان پرداخت می‌نشاند و موجودی را کم می‌کند.
+   * جایگزین‌کننده و idempotent است — موجودی اقلام قبلی برگردانده می‌شود و اقلام جدید کم می‌شود،
+   * پس ویرایش یا ارسال دوبارهٔ یک درخواست موجودی را دوبار کم نمی‌کند. مبلغ پرداخت‌شده هرگز تغییر نمی‌کند.
+   */
+  async assignItems(eventId: string, paymentId: string, dto: AssignEventPaymentItemsDto) {
+    const seen = new Set<string>();
+    for (const item of dto.items) {
+      if (seen.has(item.productVariantId)) {
+        throw new BadRequestException('هر واریانت فقط یک‌بار در لیست می‌تواند باشد');
+      }
+      seen.add(item.productVariantId);
+    }
+
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: [...seen] }, isDeleted: false },
+      select: {
+        id: true,
+        sku: true,
+        productId: true,
+        product: { select: { title: true, costPrice: true, isDeleted: true } },
+      },
+    });
+    const variantById = new Map(variants.map((v) => [v.id, v]));
+    for (const item of dto.items) {
+      const variant = variantById.get(item.productVariantId);
+      if (!variant || variant.product.isDeleted) {
+        throw new BadRequestException('محصول یا واریانت پیدا نشد');
+      }
+      if (variant.productId !== item.productId) {
+        throw new BadRequestException('واریانت متعلق به این محصول نیست');
+      }
+    }
+
+    const itemsTotal = dto.items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+    const costOfGoods = dto.items.reduce(
+      (sum, i) => sum + i.quantity * Number(variantById.get(i.productVariantId)!.product.costPrice),
+      0,
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`event-payment-assign:${paymentId}`}))`;
+
+      const payment = await tx.eventPayment.findFirst({
+        where: { id: paymentId, eventId },
+        include: {
+          event: { select: { name: true } },
+          offlineSale: { include: { items: true } },
+        },
+      });
+      if (!payment) throw new NotFoundException('پرداخت یافت نشد');
+      if (payment.status !== 'PAID') {
+        throw new BadRequestException('فقط پرداخت‌های موفق قابل تعیین تکلیف هستند');
+      }
+
+      // فروشِ حذف‌شده موجودی‌اش همان موقع برگردانده شده؛ دوباره برنگردان
+      let sale = payment.offlineSale && !payment.offlineSale.isDeleted ? payment.offlineSale : null;
+      if (sale) {
+        for (const old of sale.items) {
+          await tx.productVariant.updateMany({
+            where: { id: old.productVariantId, isDeleted: false },
+            data: { stock: { increment: old.quantity } },
+          });
+        }
+      }
+
+      for (const item of dto.items) {
+        const reserved = await tx.productVariant.updateMany({
+          where: { id: item.productVariantId, isDeleted: false, stock: { gte: item.quantity } },
+          data: { stock: { decrement: item.quantity } },
+        });
+        if (reserved.count === 0) {
+          throw new BadRequestException(
+            `موجودی کافی نیست: ${variantById.get(item.productVariantId)!.sku}`,
+          );
+        }
+      }
+
+      // پرداخت‌هایی که پیش از ثبت خودکار فروش PAID شده‌اند هنوز فروش ندارند
+      const paid = payment.amount;
+      const totalAmount = Math.max(itemsTotal, paid.toNumber());
+      const saleData = {
+        totalAmount,
+        discountAmount: totalAmount - paid.toNumber(),
+        payableAmount: paid,
+        netAmount: paid,
+        costOfGoods,
+      };
+      const itemRows = dto.items.map((item) => {
+        const variant = variantById.get(item.productVariantId)!;
+        return {
+          productId: item.productId,
+          productVariantId: item.productVariantId,
+          sku: variant.sku,
+          title: variant.product.title,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          unitCostPrice: Number(variant.product.costPrice),
+        };
+      });
+
+      if (sale) {
+        await tx.offlineSale.update({
+          where: { id: sale.id },
+          data: { ...saleData, items: { deleteMany: {}, create: itemRows } },
+        });
+      } else {
+        const created = await tx.offlineSale.create({
+          data: {
+            ...saleData,
+            channel: `ایونت ${payment.event.name}`,
+            note: `پرداخت آنلاین ایونت${payment.refId ? ` — کد پیگیری ${payment.refId}` : ''}`,
+            soldAt: payment.verifiedAt ?? payment.createdAt,
+            customerId: payment.userId,
+            items: { create: itemRows },
+          },
+          select: { id: true },
+        });
+        await tx.eventPayment.update({
+          where: { id: payment.id },
+          data: { offlineSaleId: created.id },
+        });
+      }
+    });
+
+    const saved = await this.prisma.eventPayment.findFirstOrThrow({
+      where: { id: paymentId, eventId },
+      include: ADMIN_PAYMENT_INCLUDE,
+    });
+    return serializeAdminPayment(saved);
   }
 
   async findMine(userId: string, id: string) {

@@ -120,6 +120,14 @@ export class BasketController {
     return !!grant;
   }
 
+  /** مجموع سبد از آستانهٔ ارسال رایگان (تنظیم ادمین) بیشتر یا مساوی است؟ */
+  private async qualifiesForThresholdFreeShipping(
+    subtotalCents: number,
+  ): Promise<boolean> {
+    const threshold = await this.pricingService.getFreeShippingThreshold();
+    return threshold > 0 && subtotalCents >= toCents(threshold);
+  }
+
   /** یک واحد از ارسال رایگان کاربر را مصرف می‌کند؛ اگر چیزی نمانده باشد false برمی‌گرداند */
   private async consumeFreeShipping(
     tx: Prisma.TransactionClient,
@@ -468,6 +476,42 @@ export class BasketController {
     return this.getBasketResponse(userId);
   }
 
+  @Get('shipping-eligibility')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'آیا ارسال این کاربر رایگان است؟ (آستانهٔ سبد یا ارسال رایگان هدیه)',
+  })
+  async shippingEligibility(@Req() req: any) {
+    const userId = req.user.id;
+    const [threshold, basket] = await Promise.all([
+      this.pricingService.getFreeShippingThreshold(),
+      this.prisma.tempBasket.findFirst({
+        where: { userId, isDeleted: false },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          items: {
+            where: { isDeleted: false },
+            include: { productVariant: { include: { product: true } } },
+          },
+        },
+      }),
+    ]);
+    const subtotalCents = (basket?.items ?? []).reduce((sum, item) => {
+      const product = item.productVariant.product;
+      const unit = product.discountPrice ?? product.finalPrice;
+      return sum + toCents(unit) * item.quantity;
+    }, 0);
+
+    let reason: 'THRESHOLD' | 'GRANT' | null = null;
+    if (threshold > 0 && subtotalCents >= toCents(threshold)) {
+      reason = 'THRESHOLD';
+    } else if (await this.hasFreeShipping(this.prisma, userId)) {
+      reason = 'GRANT';
+    }
+    return { isFree: reason !== null, reason, threshold };
+  }
+
   @Post('checkout/preview')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
@@ -526,7 +570,11 @@ export class BasketController {
       });
       if (!method) throw new BadRequestException('روش ارسال معتبر نیست');
       shippingCostCents = toCents(method.price ?? 0);
-      if (shippingCostCents > 0 && (await this.hasFreeShipping(this.prisma, userId))) {
+      if (
+        shippingCostCents > 0 &&
+        ((await this.qualifiesForThresholdFreeShipping(subtotalCents)) ||
+          (await this.hasFreeShipping(this.prisma, userId)))
+      ) {
         shippingCostCents = 0;
       }
     }
@@ -822,8 +870,13 @@ export class BasketController {
         });
         if (!method) throw new BadRequestException('روش ارسال معتبر نیست');
         shippingCostCents = toCents(method.price ?? 0);
-        if (shippingCostCents > 0 && (await this.consumeFreeShipping(tx, userId))) {
-          shippingCostCents = 0;
+        if (shippingCostCents > 0) {
+          // آستانهٔ سبد خرید اولویت دارد تا یکی از دفعات ارسال رایگان کاربر بی‌دلیل مصرف نشود
+          if (await this.qualifiesForThresholdFreeShipping(subtotalCents)) {
+            shippingCostCents = 0;
+          } else if (await this.consumeFreeShipping(tx, userId)) {
+            shippingCostCents = 0;
+          }
         }
         shippingMethodId = method.id;
         shippingMethodTitle = method.title;

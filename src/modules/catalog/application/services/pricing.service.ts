@@ -70,6 +70,17 @@ export class PricingService {
     return packagingCost;
   }
 
+  /**
+   * حداقل مجموع سبد خرید (تومان) برای ارسال رایگان. صفر یعنی غیرفعال.
+   */
+  async getFreeShippingThreshold(): Promise<number> {
+    const row = await this.prisma.siteSetting.findUnique({
+      where: { key: 'FREE_SHIPPING_THRESHOLD' },
+      select: { value: true },
+    });
+    return Number(row?.value) || 0;
+  }
+
   private async recalculateProductPrices(
     where: Prisma.ProductWhereInput,
     taxPercent: number,

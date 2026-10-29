@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -19,6 +20,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { EventService } from './event.service';
+import { EventPaymentService } from './event-payment.service';
+import { AssignEventPaymentItemsDto } from './dtos/assign-event-payment-items.dto';
+import { EventPaymentsQueryDto } from './dtos/event-payments-query.dto';
 import { CreateEventDto } from './dtos/create-event.dto';
 import { UpdateEventDto } from './dtos/update-event.dto';
 import { EventQueryDto } from './dtos/event-query.dto';
@@ -29,7 +33,10 @@ import { UpdateEventImageDto } from './dtos/update-event-image.dto';
 @UseGuards(AuthGuard('jwt'))
 @ApiBearerAuth()
 export class EventController {
-  constructor(private readonly eventService: EventService) {}
+  constructor(
+    private readonly eventService: EventService,
+    private readonly eventPaymentService: EventPaymentService,
+  ) {}
 
   private assertCanWrite(req: any) {
     const isAdmin = req.user?.role === 'ADMIN';
@@ -62,6 +69,32 @@ export class EventController {
   findOne(@Req() req: any, @Param('id') id: string) {
     this.assertCanWrite(req);
     return this.eventService.findOne(id);
+  }
+
+  @Get(':id/payments')
+  @ApiOperation({ summary: 'پرداخت‌های موفق رویداد به‌همراه اقلام تعیین‌تکلیف‌شده' })
+  @ApiParam({ name: 'id', type: String })
+  listPayments(@Req() req: any, @Param('id') id: string, @Query() query: EventPaymentsQueryDto) {
+    this.assertCanWrite(req);
+    return this.eventPaymentService.listForEvent(id, {
+      page: query.page ?? 1,
+      limit: query.limit ?? 20,
+      unassignedOnly: query.unassignedOnly,
+    });
+  }
+
+  @Put(':id/payments/:paymentId/items')
+  @ApiOperation({ summary: 'تعیین تکلیف پرداخت: ثبت اقلام خریداری‌شده و کسر خودکار موجودی' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiParam({ name: 'paymentId', type: String })
+  assignPaymentItems(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: AssignEventPaymentItemsDto,
+  ) {
+    this.assertCanWrite(req);
+    return this.eventPaymentService.assignItems(id, paymentId, dto);
   }
 
   @Patch(':id')

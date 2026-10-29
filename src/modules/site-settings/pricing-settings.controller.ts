@@ -12,6 +12,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { PricingService } from '../catalog/application/services/pricing.service';
 import { UpdatePricingSettingsDto } from './dtos/update-pricing-settings.dto';
+import { UpdateFreeShippingSettingsDto } from './dtos/update-free-shipping-settings.dto';
 
 @ApiTags('Site settings')
 @Controller('site-settings')
@@ -84,5 +85,33 @@ export class PricingSettingsController {
       taxPercent: dto.taxPercent,
       updatedProductsCount,
     };
+  }
+
+  @Get('free-shipping')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'دریافت حداقل مجموع سبد برای ارسال رایگان' })
+  async getFreeShipping(@Req() req: any) {
+    this.assertCanManage(req);
+    return { threshold: await this.pricingService.getFreeShippingThreshold() };
+  }
+
+  @Patch('free-shipping')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'تغییر حداقل مجموع سبد برای ارسال رایگان (۰ = غیرفعال)',
+  })
+  async updateFreeShipping(
+    @Req() req: any,
+    @Body() dto: UpdateFreeShippingSettingsDto,
+  ) {
+    this.assertCanManage(req);
+    await this.prisma.siteSetting.upsert({
+      where: { key: 'FREE_SHIPPING_THRESHOLD' },
+      create: { key: 'FREE_SHIPPING_THRESHOLD', value: String(dto.threshold) },
+      update: { value: String(dto.threshold) },
+    });
+    return { threshold: dto.threshold };
   }
 }
