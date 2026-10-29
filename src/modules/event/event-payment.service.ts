@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Logger, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { EventPaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { PaymentService } from '../payment/payment.service';
 import { SmsTextService } from '../shared/sms/sms-text.service';
@@ -47,6 +47,7 @@ function serializeAdminPayment(
   }));
   return {
     id: p.id,
+    status: p.status,
     amount: p.amount.toNumber(),
     refId: p.refId,
     verifiedAt: p.verifiedAt,
@@ -281,13 +282,22 @@ export class EventPaymentService {
   }
 
   /** لیست پرداخت‌های موفق یک ایونت برای ادمین، به‌همراه اقلام تعیین‌تکلیف‌شدهٔ هر پرداخت */
-  async listForEvent(eventId: string, params: { page: number; limit: number; unassignedOnly?: boolean }) {
+  async listForEvent(
+    eventId: string,
+    params: {
+      page: number;
+      limit: number;
+      status?: EventPaymentStatus;
+      unassignedOnly?: boolean;
+    },
+  ) {
     await this.eventService.findOne(eventId);
-    const { page, limit, unassignedOnly } = params;
+    const { page, limit, status, unassignedOnly } = params;
 
     const where: Prisma.EventPaymentWhereInput = {
       eventId,
-      status: 'PAID',
+      // تعیین‌تکلیف‌نشده فقط دربارهٔ پرداخت‌های موفق معنی دارد
+      ...(unassignedOnly ? { status: 'PAID' as const } : status ? { status } : {}),
       ...(unassignedOnly
         ? { OR: [{ offlineSaleId: null }, { offlineSale: { is: { items: { none: {} } } } }] }
         : {}),
@@ -297,7 +307,7 @@ export class EventPaymentService {
       this.prisma.eventPayment.count({ where }),
       this.prisma.eventPayment.findMany({
         where,
-        orderBy: { verifiedAt: 'desc' },
+        orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
         include: ADMIN_PAYMENT_INCLUDE,

@@ -72,13 +72,14 @@ export class EventController {
   }
 
   @Get(':id/payments')
-  @ApiOperation({ summary: 'پرداخت‌های موفق رویداد به‌همراه اقلام تعیین‌تکلیف‌شده' })
+  @ApiOperation({ summary: 'تراکنش‌های رویداد (همه وضعیت‌ها) به‌همراه اقلام تعیین‌تکلیف‌شده' })
   @ApiParam({ name: 'id', type: String })
   listPayments(@Req() req: any, @Param('id') id: string, @Query() query: EventPaymentsQueryDto) {
     this.assertCanWrite(req);
     return this.eventPaymentService.listForEvent(id, {
       page: query.page ?? 1,
       limit: query.limit ?? 20,
+      status: query.status,
       unassignedOnly: query.unassignedOnly,
     });
   }
