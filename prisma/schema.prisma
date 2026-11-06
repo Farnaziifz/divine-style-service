@@ -676,6 +676,8 @@ model OrderItem {
   quantity          Int
   unitPrice         Decimal        @db.Decimal(10, 2)
   unitDiscountPrice Decimal?       @db.Decimal(10, 2)
+  /// اسنپ‌شات Product.costPrice در لحظهٔ ثبت سفارش؛ null برای ردیف‌های قدیمی که backfill نشده‌اند (گزارش‌ها به costPrice زندهٔ محصول fallback می‌کنند)
+  costPrice         Decimal?       @db.Decimal(12, 2)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
   isDeleted         Boolean        @default(false)

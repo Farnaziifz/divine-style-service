@@ -99,8 +99,9 @@ export class AdminSalesReportController {
 
   /**
    * سود خالص = مبلغ پرداختی − هزینه ارسال − بهای تمام‌شدهٔ کالاها − (هزینه بسته‌بندی × تعداد آیتم)
-   * توجه: تخفیف سفارش از قبل در مبلغ پرداختی لحاظ شده. بهای تمام‌شده و هزینه بسته‌بندی
-   * بر اساس مقدار فعلی محصول/تنظیمات محاسبه می‌شود (نه مقدار لحظهٔ ثبت سفارش).
+   * توجه: تخفیف سفارش از قبل در مبلغ پرداختی لحاظ شده. بهای تمام‌شده از اسنپ‌شات OrderItem.costPrice
+   * (لحظهٔ ثبت سفارش) می‌آید و فقط برای ردیف‌های قدیمیِ backfill‌نشده به costPrice فعلی محصول fallback می‌کند؛
+   * هزینه بسته‌بندی همچنان از تنظیمات فعلی سایت محاسبه می‌شود.
    */
   private computeNetProfit(params: {
     payableAmount: number;
@@ -153,7 +154,7 @@ export class AdminSalesReportController {
 
     const [costRows, packagingCost] = await Promise.all([
       this.prisma.$queryRaw<Array<{ cost_of_goods: Prisma.Decimal }>>(Prisma.sql`
-        SELECT COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods
+        SELECT COALESCE(SUM(oi."quantity" * COALESCE(oi."costPrice", p."costPrice")), 0)::numeric AS cost_of_goods
         FROM "OrderItem" oi
         INNER JOIN "Order" o ON o.id = oi."orderId"
         INNER JOIN "Product" p ON p.id = oi."productId"
@@ -230,7 +231,7 @@ export class AdminSalesReportController {
           _sum: { quantity: true },
         }),
         this.prisma.$queryRaw<Array<{ cost_of_goods: Prisma.Decimal }>>(Prisma.sql`
-          SELECT COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods
+          SELECT COALESCE(SUM(oi."quantity" * COALESCE(oi."costPrice", p."costPrice")), 0)::numeric AS cost_of_goods
           FROM "OrderItem" oi
           INNER JOIN "Order" o ON o.id = oi."orderId"
           INNER JOIN "Product" p ON p.id = oi."productId"
@@ -546,7 +547,7 @@ export class AdminSalesReportController {
         SELECT
           to_char(date_trunc('day', (o."paidAt" AT TIME ZONE 'Asia/Tehran')), 'YYYY-MM-DD') AS day,
           COALESCE(SUM(oi."quantity"), 0)::bigint AS quantity,
-          COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods
+          COALESCE(SUM(oi."quantity" * COALESCE(oi."costPrice", p."costPrice")), 0)::numeric AS cost_of_goods
         FROM "OrderItem" oi
         INNER JOIN "Order" o ON o.id = oi."orderId"
         INNER JOIN "Product" p ON p.id = oi."productId"
@@ -630,7 +631,7 @@ export class AdminSalesReportController {
         _sum: { quantity: true },
       }),
       this.prisma.$queryRaw<Array<{ cost_of_goods: Prisma.Decimal }>>(Prisma.sql`
-        SELECT COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods
+        SELECT COALESCE(SUM(oi."quantity" * COALESCE(oi."costPrice", p."costPrice")), 0)::numeric AS cost_of_goods
         FROM "OrderItem" oi
         INNER JOIN "Order" o ON o.id = oi."orderId"
         INNER JOIN "Product" p ON p.id = oi."productId"
@@ -774,7 +775,7 @@ export class AdminSalesReportController {
         SELECT
           to_char(date_trunc('day', (o."paidAt" AT TIME ZONE 'Asia/Tehran')), 'YYYY-MM-DD') AS day,
           COALESCE(SUM(oi."quantity"), 0)::bigint AS quantity,
-          COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods
+          COALESCE(SUM(oi."quantity" * COALESCE(oi."costPrice", p."costPrice")), 0)::numeric AS cost_of_goods
         FROM "OrderItem" oi
         INNER JOIN "Order" o ON o.id = oi."orderId"
         INNER JOIN "Product" p ON p.id = oi."productId"
@@ -824,7 +825,7 @@ export class AdminSalesReportController {
           MAX(oi."title") AS title,
           COALESCE(SUM(oi."quantity"), 0)::bigint AS quantity,
           COALESCE(SUM((COALESCE(oi."unitDiscountPrice", oi."unitPrice")) * oi."quantity"), 0)::numeric AS revenue,
-          COALESCE(SUM(oi."quantity" * p."costPrice"), 0)::numeric AS cost_of_goods,
+          COALESCE(SUM(oi."quantity" * COALESCE(oi."costPrice", p."costPrice")), 0)::numeric AS cost_of_goods,
           COUNT(DISTINCT oi."orderId")::bigint AS orders_count
         FROM "OrderItem" oi
         INNER JOIN "Order" o ON o.id = oi."orderId"
@@ -995,7 +996,7 @@ export class AdminSalesReportController {
     const data = orders.map((o) => {
       const quantity = o.items.reduce((sum, it) => sum + it.quantity, 0);
       const costOfGoods = o.items.reduce(
-        (sum, it) => sum + it.quantity * Number(it.product.costPrice),
+        (sum, it) => sum + it.quantity * Number(it.costPrice ?? it.product.costPrice),
         0,
       );
       const netProfit = this.computeNetProfit({

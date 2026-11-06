@@ -1205,6 +1205,7 @@ export class BasketController {
             quantity: item.quantity,
             unitPrice: variant.product.finalPrice,
             unitDiscountPrice: variant.product.discountPrice ?? null,
+            costPrice: variant.product.costPrice,
             isDeleted: false,
             deletedAt: null,
           };

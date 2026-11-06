@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -17,11 +19,19 @@ import { PrismaService } from '../shared/prisma/prisma.service';
 import { PaginationDto } from '../shared/dtos/pagination.dto';
 import { CreateOrderCommentDto } from './dtos/create-order-comment.dto';
 import { UpdateOrderStatusDto } from './dtos/update-order-status.dto';
+import {
+  AdminUpdateOrderDto,
+  AdminUpdateOrderItemDto,
+} from './dtos/admin-edit-order.dto';
+import { OrderAdminService } from './order-admin.service';
 
 @ApiTags('Orders')
 @Controller('orders')
 export class OrderController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly orderAdmin: OrderAdminService,
+  ) {}
 
   private hasPermission(user: any, permission: string) {
     return (
@@ -55,6 +65,37 @@ export class OrderController {
     }
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
+  }
+
+  /**
+   * فروش و سود این سفارش با همان فرمول گزارش‌های فروش:
+   * سود = مبلغ پرداختی − هزینه ارسال − بهای تمام‌شدهٔ آیتم‌ها − (هزینه بسته‌بندی تنظیمات × تعداد آیتم)
+   */
+  private async computeFinancials(order: any) {
+    const setting = await this.prisma.siteSetting.findUnique({
+      where: { key: 'PACKAGING_COST' },
+      select: { value: true },
+    });
+    const packagingUnit = Number(setting?.value) || 0;
+    const quantity = order.items.reduce((s: number, it: any) => s + it.quantity, 0);
+    const costOfGoods = order.items.reduce(
+      (s: number, it: any) =>
+        s + it.quantity * this.toNumber(it.costPrice ?? it.product?.costPrice),
+      0,
+    );
+    const payable = this.toNumber(order.payableAmount);
+    const shipping = this.toNumber(order.shippingCost);
+    const total = this.toNumber(order.totalAmount);
+    const discount = this.toNumber(order.discountAmount);
+    const packaging = this.toNumber(order.packagingCost);
+    return {
+      itemsQuantity: quantity,
+      costOfGoods,
+      packagingCostForProfit: packagingUnit * quantity,
+      netProfit: payable - shipping - costOfGoods - packagingUnit * quantity,
+      /** سهم کیف پول (در Order ذخیره نشده؛ از اختلاف مبالغ استخراج می‌شود) */
+      walletApplied: Math.max(0, total - discount + shipping + packaging - payable),
+    };
   }
 
   @Get()
@@ -238,7 +279,9 @@ export class OrderController {
             quantity: true,
             unitPrice: true,
             unitDiscountPrice: true,
+            costPrice: true,
             createdAt: true,
+            product: { select: { costPrice: true } },
             productVariant: {
               select: {
                 images: true,
@@ -314,6 +357,9 @@ export class OrderController {
       updatedAt: order.updatedAt,
       paidAt: order.paidAt,
       user: order.user,
+      ...(this.canReadAllOrders(req.user)
+        ? { financials: await this.computeFinancials(order) }
+        : {}),
       items: order.items.map((it) => ({
         id: it.id,
         productId: it.productId,
@@ -328,6 +374,11 @@ export class OrderController {
           it.unitDiscountPrice != null
             ? this.toNumber(it.unitDiscountPrice)
             : null,
+        ...(this.canReadAllOrders(req.user)
+          ? {
+              costPrice: this.toNumber(it.costPrice ?? it.product?.costPrice),
+            }
+          : {}),
         imageUrl:
           it.productVariant?.images?.[0] ??
           it.productVariant?.product?.images?.[0] ??
@@ -495,5 +546,68 @@ export class OrderController {
     });
 
     return updated;
+  }
+
+  private assertAdminWrite(req: any) {
+    if (!this.canWriteOrders(req.user)) {
+      throw new ForbiddenException('Forbidden');
+    }
+  }
+
+  @Patch(':orderCode')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin: edit order-level fields (discount/shipping/packaging/address)' })
+  async adminUpdateOrder(
+    @Req() req: any,
+    @Param('orderCode') orderCode: string,
+    @Body() dto: AdminUpdateOrderDto,
+  ) {
+    this.assertAdminWrite(req);
+    return this.orderAdmin.updateOrder(orderCode, dto, req.user?.id);
+  }
+
+  @Patch(':orderCode/items/:itemId')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin: edit one order item (quantity / unit price)' })
+  async adminUpdateItem(
+    @Req() req: any,
+    @Param('orderCode') orderCode: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: AdminUpdateOrderItemDto,
+  ) {
+    this.assertAdminWrite(req);
+    return this.orderAdmin.updateItem(orderCode, itemId, dto, req.user?.id);
+  }
+
+  @Delete(':orderCode/items/:itemId')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin: remove one item from an order' })
+  async adminDeleteItem(
+    @Req() req: any,
+    @Param('orderCode') orderCode: string,
+    @Param('itemId') itemId: string,
+    @Query('returnToStock') returnToStock?: string,
+  ) {
+    this.assertAdminWrite(req);
+    return this.orderAdmin.deleteItem(orderCode, itemId, returnToStock === 'true', req.user?.id);
+  }
+
+  @Delete(':orderCode')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin only: delete an entire order' })
+  async adminDeleteOrder(
+    @Req() req: any,
+    @Param('orderCode') orderCode: string,
+    @Query('returnToStock') returnToStock?: string,
+  ) {
+    // حذف کل سفارش مخرب‌تر از ویرایش است؛ فقط ادمین (نه اپراتور)
+    if (req.user?.role !== 'ADMIN') {
+      throw new ForbiddenException('Forbidden');
+    }
+    return this.orderAdmin.deleteOrder(orderCode, returnToStock === 'true', req.user?.id);
   }
 }
