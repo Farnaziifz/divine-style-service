@@ -25,8 +25,8 @@ export class BasketCheckoutDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  @IsIn(['ZARINPAL', 'ZIBAL'])
-  paymentProvider?: 'ZARINPAL' | 'ZIBAL';
+  @IsIn(['ZARINPAL', 'ZIBAL', 'SNAPPPAY'])
+  paymentProvider?: 'ZARINPAL' | 'ZIBAL' | 'SNAPPPAY';
 
   @ApiPropertyOptional({ description: 'مبلغ درخواستی برای اعمال از کیف‌پول (تومان)' })
   @IsOptional()

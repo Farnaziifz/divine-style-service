@@ -1,7 +1,12 @@
 import {
+  BadRequestException,
+  Body,
   Controller,
+  ForbiddenException,
   Get,
   Logger,
+  Param,
+  Post,
   Query,
   Req,
   Res,
@@ -15,6 +20,7 @@ import { toJalaali } from 'jalaali-js';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { PaginationDto } from '../shared/dtos/pagination.dto';
 import { PaymentService } from './payment.service';
+import { SnappPayService } from './snapp-pay.service';
 import { OrderReservationService } from '../order/order-reservation.service';
 import { RESERVATION_TTL_MS, orderSettleLockKey } from '../order/reservation.constants';
 import { SmsTextService } from '../shared/sms/sms-text.service';
@@ -39,6 +45,7 @@ export class PaymentController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentService: PaymentService,
+    private readonly snappPay: SnappPayService,
     private readonly orderReservation: OrderReservationService,
     private readonly smsText: SmsTextService,
     private readonly cashbackGrant: CashbackGrantService,
@@ -266,10 +273,13 @@ export class PaymentController {
       defaultSetting?.value,
     );
 
+    const snappSettings = await this.snappPay.getSettings();
+
     return {
       options: this.providerOptions,
       activeProviders,
       defaultProvider,
+      snappPay: { enabled: snappSettings.enabled },
     };
   }
 
@@ -369,6 +379,8 @@ export class PaymentController {
           amount: true,
           authority: true,
           refId: true,
+          gatewayTransactionId: true,
+          gatewayStatus: true,
           createdAt: true,
           verifiedAt: true,
           order: {
@@ -390,6 +402,8 @@ export class PaymentController {
         amount: this.toNumber(tx.amount),
         authority: tx.authority,
         refId: tx.refId,
+        gatewayTransactionId: tx.gatewayTransactionId,
+        gatewayStatus: tx.gatewayStatus,
         createdAt: tx.createdAt,
         verifiedAt: tx.verifiedAt,
         order: tx.order,
@@ -787,5 +801,330 @@ export class PaymentController {
     }
 
     return res.redirect(callbackResult.redirect);
+  }
+
+  // ------------------------------------------------------------------
+  // Snapp Pay (اسنپ‌پی) — POST callback + verify/settle + admin reconcile
+  // ------------------------------------------------------------------
+
+  private runPaidHooks(paid: {
+    orderId: string;
+    userId: string;
+    customerMobile?: string;
+    discountCode: string | null;
+    orderCode: string;
+    payableAmount: number;
+  }) {
+    void this.notifyOrderPaid(
+      paid.orderId,
+      paid.customerMobile,
+      paid.orderCode,
+      paid.payableAmount,
+      paid.discountCode,
+    );
+    void this.grantCashbackForOrder(paid.orderId);
+    void this.evaluateCouponTriggersForOrder(paid.orderId);
+    void this.grantReferralCashbackForOrder(paid.orderId);
+    void this.notifyNextWelcomeTier(paid.userId, paid.customerMobile);
+  }
+
+  private canWritePayments(user: any) {
+    return (
+      user?.role === 'ADMIN' ||
+      (user?.role === 'OPERATOR' && this.hasPermission(user, 'ORDERS_WRITE'))
+    );
+  }
+
+  /**
+   * Marks the order/payment PAID after Snapp Pay reported SETTLE. Same
+   * guarded-update + resurrection logic as the Zarinpal/Zibal callbacks, but
+   * split from the gateway calls: Snapp's verify/settle can take up to 30s, far
+   * longer than a DB transaction should be held open.
+   */
+  private async finalizeSnappPaid(paymentTransactionId: string) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const lookup = await tx.paymentTransaction.findUnique({
+          where: { id: paymentTransactionId },
+          select: { orderId: true },
+        });
+        if (!lookup) return { orderCode: null as string | null, paid: null };
+
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderSettleLockKey(lookup.orderId)}))`;
+
+        const current = await tx.paymentTransaction.findUnique({
+          where: { id: paymentTransactionId },
+          include: { order: { include: { user: { select: { mobile: true } } } } },
+        });
+        if (!current) return { orderCode: null as string | null, paid: null };
+
+        const orderId = current.orderId;
+        const orderCode = current.order?.orderCode || orderId;
+
+        if (current.status === 'PAID' || current.order?.paymentStatus === 'PAID') {
+          if (current.gatewayStatus !== 'SETTLE') {
+            await tx.paymentTransaction.update({
+              where: { id: current.id },
+              data: { gatewayStatus: 'SETTLE' },
+            });
+          }
+          return { orderCode, paid: null };
+        }
+
+        const refId = current.gatewayTransactionId ?? current.authority ?? null;
+        const paidData = {
+          status: 'PAID' as const,
+          refId,
+          gatewayStatus: 'SETTLE',
+          verifiedAt: new Date(),
+        };
+
+        const txUpdate = await tx.paymentTransaction.updateMany({
+          where: { id: current.id, status: 'INITIATED' },
+          data: paidData,
+        });
+        const orderUpdate = await tx.order.updateMany({
+          where: { id: orderId, paymentStatus: 'PENDING' },
+          data: { paymentStatus: 'PAID', orderStatus: 'PAID', paidAt: new Date() },
+        });
+
+        let settled = txUpdate.count > 0 && orderUpdate.count > 0;
+
+        if (!settled) {
+          const resurrection = await this.orderReservation.confirmPaidAfterRelease(
+            tx,
+            orderId,
+          );
+          if (resurrection.resurrected) {
+            await tx.paymentTransaction.updateMany({
+              where: { id: current.id },
+              data: paidData,
+            });
+            await tx.order.updateMany({
+              where: { id: orderId },
+              data: { paymentStatus: 'PAID', orderStatus: 'PAID', paidAt: new Date() },
+            });
+            settled = true;
+            if (resurrection.stockShortages.length > 0) {
+              this.logger.error(
+                `Order ${orderCode} paid via Snapp Pay after being released early (variants short on stock: ${resurrection.stockShortages.join(', ')}) — needs manual stock review`,
+              );
+            } else {
+              this.logger.warn(
+                `Order ${orderCode} paid via Snapp Pay after being released early by the reservation sweeper — resurrected successfully`,
+              );
+            }
+          } else {
+            this.logger.error(
+              `Order ${orderCode}: Snapp Pay settled (txn ${refId}) but the order could not be settled or resurrected — needs manual reconciliation`,
+            );
+          }
+        }
+
+        return {
+          orderCode,
+          paid: settled
+            ? {
+                orderId,
+                userId: current.order!.userId,
+                customerMobile: current.order?.user?.mobile,
+                discountCode: current.order?.discountCode ?? null,
+                orderCode,
+                payableAmount: Math.round(Number(current.amount)),
+              }
+            : null,
+        };
+      },
+      { timeout: 15_000 },
+    );
+  }
+
+  /** Abandon a Snapp Pay attempt that did not go through: free stock + put the basket back. */
+  private async failSnappAttempt(
+    paymentTransactionId: string,
+    gatewayStatus: string,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      const current = await tx.paymentTransaction.findUnique({
+        where: { id: paymentTransactionId },
+        include: { order: { select: { id: true, userId: true } } },
+      });
+      if (!current?.order) return;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderSettleLockKey(current.orderId)}))`;
+      const released = await this.orderReservation.releaseOrder(tx, current.orderId);
+      if (released) {
+        await this.restoreOrderToBasket(tx, current.orderId, current.order.userId);
+      }
+      await tx.paymentTransaction.updateMany({
+        where: { id: paymentTransactionId, status: { not: 'PAID' } },
+        data: { gatewayStatus },
+      });
+    });
+  }
+
+  @Post('snapppay/callback')
+  @ApiOperation({ summary: 'Snapp Pay return URL (form POST: transactionId, state, amount)' })
+  async snappPayCallback(
+    @Body() body: { transactionId?: string; state?: string; amount?: string | number },
+    @Query('lang') lang: string,
+    @Res() res: Response,
+  ) {
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+    const language = lang || 'fa';
+    const failedUrl = `${frontendUrl}/${language}/payment/failed`;
+    const resultUrl = (orderCode: string) =>
+      `${frontendUrl}/${language}/payment/result/${encodeURIComponent(orderCode)}`;
+    // Snapp Pay POSTs the browser here; 303 turns the follow-up into a GET.
+    const redirect = (url: string) => res.redirect(303, url);
+
+    const transactionId = String(body?.transactionId ?? '').trim();
+    if (!transactionId) return redirect(failedUrl);
+
+    // Phase 1 — claim the callback (once) under lock; no gateway I/O in here.
+    const claim = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`snapppay-callback:${transactionId}`}))`;
+
+      const current = await tx.paymentTransaction.findFirst({
+        where: {
+          gatewayTransactionId: transactionId,
+          provider: 'SNAPPPAY',
+          isDeleted: false,
+        },
+        include: { order: { select: { orderCode: true } } },
+      });
+      if (!current) return { kind: 'missing' as const };
+
+      const orderCode = current.order?.orderCode || current.orderId;
+      if (current.status === 'PAID') {
+        return { kind: 'done' as const, orderCode };
+      }
+      // Snapp says verify must be called a single time, even if the return
+      // URL is hit repeatedly — only the first callback gets to claim it.
+      const claimed = await tx.paymentTransaction.updateMany({
+        where: { id: current.id, status: 'INITIATED', gatewayStatus: null },
+        data: { gatewayStatus: 'CALLBACK_RECEIVED' },
+      });
+      if (claimed.count === 0) {
+        return { kind: 'done' as const, orderCode };
+      }
+      return {
+        kind: 'claimed' as const,
+        orderCode,
+        paymentTransactionId: current.id,
+        paymentToken: current.authority,
+      };
+    });
+
+    if (claim.kind === 'missing') return redirect(failedUrl);
+    if (claim.kind === 'done') return redirect(resultUrl(claim.orderCode));
+    if (!claim.paymentToken) {
+      await this.failSnappAttempt(claim.paymentTransactionId, 'NO_TOKEN');
+      return redirect(resultUrl(claim.orderCode));
+    }
+
+    // Phase 2 — talk to Snapp Pay (verify -> settle) outside any DB transaction.
+    const state = String(body?.state ?? '').toUpperCase();
+    try {
+      if (state !== 'OK') {
+        // Don't take a plain "FAILED" form post on faith: only an actual
+        // VERIFY/SETTLE state at Snapp should keep the order alive.
+        const status = await this.snappPay
+          .getStatus(claim.paymentToken)
+          .catch(() => null);
+        if (status?.status !== 'VERIFY' && status?.status !== 'SETTLE') {
+          await this.failSnappAttempt(
+            claim.paymentTransactionId,
+            status?.status ?? 'FAILED',
+          );
+          return redirect(resultUrl(claim.orderCode));
+        }
+      }
+      await this.snappPay.verifyAndSettle(claim.paymentToken);
+    } catch (err) {
+      const status = await this.snappPay
+        .getStatus(claim.paymentToken)
+        .catch(() => null);
+      if (status?.status === 'SETTLE') {
+        // actually went through — fall through to finalize below
+      } else if (status?.status === 'VERIFY') {
+        // Money is held but settle did not complete: keep the order for the
+        // admin to reconcile instead of releasing stock for a charged customer.
+        await this.prisma.paymentTransaction.update({
+          where: { id: claim.paymentTransactionId },
+          data: { gatewayStatus: 'VERIFY' },
+        });
+        this.logger.error(
+          `Order ${claim.orderCode}: Snapp Pay verified but settle failed (${(err as Error).message}) — needs reconciliation from the admin panel`,
+        );
+        return redirect(resultUrl(claim.orderCode));
+      } else {
+        this.logger.warn(
+          `Order ${claim.orderCode}: Snapp Pay verify failed (${(err as Error).message}), status=${status?.status ?? 'unknown'}`,
+        );
+        await this.failSnappAttempt(
+          claim.paymentTransactionId,
+          status?.status ?? 'VERIFY_FAILED',
+        );
+        return redirect(resultUrl(claim.orderCode));
+      }
+    }
+
+    // Phase 3 — Snapp settled: mark the order paid.
+    const finalized = await this.finalizeSnappPaid(claim.paymentTransactionId);
+    if (finalized.paid) this.runPaidHooks(finalized.paid);
+    return redirect(resultUrl(finalized.orderCode ?? claim.orderCode));
+  }
+
+  /**
+   * Admin: re-sync a Snapp Pay transaction with Snapp's side. Covers the
+   * cases the callback cannot: customer paid but never came back, or settle
+   * failed after verify.
+   */
+  @Post('snapppay/:paymentTransactionId/reconcile')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin: reconcile a Snapp Pay transaction with Snapp' })
+  async reconcileSnappPay(
+    @Req() req: any,
+    @Param('paymentTransactionId') paymentTransactionId: string,
+  ) {
+    if (!this.canWritePayments(req.user)) throw new ForbiddenException();
+
+    const current = await this.prisma.paymentTransaction.findFirst({
+      where: { id: paymentTransactionId, provider: 'SNAPPPAY', isDeleted: false },
+      select: { id: true, authority: true, status: true },
+    });
+    if (!current?.authority) {
+      throw new BadRequestException('تراکنش اسنپ‌پی پیدا نشد');
+    }
+
+    const status = await this.snappPay.getStatus(current.authority);
+    let remote = status.status;
+
+    if (current.status !== 'PAID') {
+      if (remote === 'PENDING') {
+        await this.snappPay.verifyAndSettle(current.authority);
+        remote = 'SETTLE';
+      } else if (remote === 'VERIFY') {
+        await this.snappPay.settle(current.authority);
+        remote = 'SETTLE';
+      }
+
+      if (remote === 'SETTLE') {
+        const finalized = await this.finalizeSnappPaid(current.id);
+        if (finalized.paid) this.runPaidHooks(finalized.paid);
+        return { status: remote, finalized: true };
+      }
+
+      // CANCEL / REVERT / anything else: Snapp no longer holds a payment.
+      await this.failSnappAttempt(current.id, remote);
+      return { status: remote, finalized: false };
+    }
+
+    await this.prisma.paymentTransaction.update({
+      where: { id: current.id },
+      data: { gatewayStatus: remote },
+    });
+    return { status: remote, finalized: false };
   }
 }

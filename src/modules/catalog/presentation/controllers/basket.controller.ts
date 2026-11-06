@@ -21,6 +21,7 @@ import {
 } from '../../../referral/referral.service';
 import { WalletService } from '../../../wallet/wallet.service';
 import { PaymentService } from '../../../payment/payment.service';
+import { SnappPayService } from '../../../payment/snapp-pay.service';
 import { PricingService } from '../../application/services/pricing.service';
 import { OrderReservationService } from '../../../order/order-reservation.service';
 import { RESERVATION_TTL_MS } from '../../../order/reservation.constants';
@@ -83,6 +84,7 @@ export class BasketController {
     private readonly referralService: ReferralService,
     private readonly walletService: WalletService,
     private readonly paymentService: PaymentService,
+    private readonly snappPay: SnappPayService,
     private readonly pricingService: PricingService,
     private readonly orderReservation: OrderReservationService,
     private readonly cashbackGrant: CashbackGrantService,
@@ -704,6 +706,82 @@ export class BasketController {
     };
   }
 
+  /** Snapp Pay validates the mobile as `+98` followed by 10 digits (e.g. +989123456789). */
+  private toSnappMobile(raw: string | undefined): string {
+    let digits = String(raw ?? '').replace(/\D/g, '');
+    if (digits.startsWith('0098')) digits = digits.slice(4);
+    else if (digits.startsWith('98')) digits = digits.slice(2);
+    else if (digits.startsWith('0')) digits = digits.slice(1);
+    if (!/^\d{10}$/.test(digits)) {
+      throw new BadRequestException(
+        'شماره موبایل حساب شما برای پرداخت اسنپ‌پی معتبر نیست',
+      );
+    }
+    return `+98${digits}`;
+  }
+
+  /**
+   * Opens a Snapp Pay purchase for an already-created order: confirms Snapp
+   * still offers installments for this amount, then requests the payment
+   * token + hosted payment page.
+   */
+  private async requestSnappPayment(params: {
+    orderId: string;
+    transactionId: string;
+    returnURL: string;
+    mobile: string | undefined;
+  }): Promise<{ authority: string; paymentUrl: string | null; isMock: boolean }> {
+    const [order, settings] = await Promise.all([
+      this.prisma.order.findUniqueOrThrow({
+        where: { id: params.orderId },
+        include: {
+          items: {
+            where: { isDeleted: false },
+            orderBy: { id: 'asc' },
+            include: {
+              product: { select: { category: { select: { title: true } } } },
+            },
+          },
+        },
+      }),
+      this.snappPay.getSettings(),
+    ]);
+
+    const payload = this.snappPay.buildOrderPayload(
+      {
+        ...order,
+        items: order.items.map((i) => ({
+          ...i,
+          categoryTitle: i.product?.category?.title ?? null,
+        })),
+      },
+      settings.commissionType,
+    );
+
+    const eligibility = await this.snappPay.checkEligibility({
+      amountRial: payload.amount,
+      paymentMethodTypes: settings.forcedPaymentMethodTypes,
+    });
+    if (!eligibility?.eligible) {
+      throw new BadRequestException(
+        'پرداخت اقساطی اسنپ‌پی برای این مبلغ در دسترس نیست',
+      );
+    }
+
+    const token = await this.snappPay.requestPaymentToken({
+      payload,
+      mobile: this.toSnappMobile(params.mobile),
+      returnURL: params.returnURL,
+      transactionId: params.transactionId,
+      forcedPaymentMethodTypes: settings.forcedPaymentMethodTypes,
+    });
+    return {
+      authority: token.paymentToken,
+      paymentUrl: token.paymentPageUrl,
+      isMock: token.isMock,
+    };
+  }
+
   @Post('checkout')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
@@ -723,6 +801,16 @@ export class BasketController {
         code: 'PROFILE_INCOMPLETE',
         message: 'برای ثبت سفارش، لطفا نام و نام خانوادگی خود را تکمیل کنید',
       });
+    }
+
+    const wantsSnappPay = dto.paymentProvider === 'SNAPPPAY';
+    let snappTransactionId: string | null = null;
+    if (wantsSnappPay) {
+      const snappSettings = await this.snappPay.getSettings();
+      if (!snappSettings.enabled) {
+        throw new BadRequestException('پرداخت اقساطی اسنپ‌پی در حال حاضر فعال نیست');
+      }
+      snappTransactionId = await this.snappPay.generateTransactionId();
     }
 
     const baseResult = await this.prisma.$transaction(async (tx) => {
@@ -790,8 +878,11 @@ export class BasketController {
         defaultSetting?.value,
       );
       const requestedProvider = dto.paymentProvider;
-      const paymentProvider =
-        requestedProvider && activeProviders.includes(requestedProvider)
+      const paymentProvider: 'ZARINPAL' | 'ZIBAL' | 'SNAPPPAY' = wantsSnappPay
+        ? 'SNAPPPAY'
+        : requestedProvider &&
+            requestedProvider !== 'SNAPPPAY' &&
+            activeProviders.includes(requestedProvider)
           ? requestedProvider
           : defaultProvider;
 
@@ -1137,6 +1228,9 @@ export class BasketController {
           provider: paymentProvider as any,
           status: 'INITIATED',
           amount: fromCents(payableCents),
+          ...(paymentProvider === 'SNAPPPAY'
+            ? { gatewayTransactionId: snappTransactionId }
+            : {}),
         },
         select: { id: true },
       });
@@ -1157,9 +1251,11 @@ export class BasketController {
         ? requestedLangRaw
         : 'fa';
     const callbackUrl =
-      baseResult.paymentProvider === 'ZIBAL'
-        ? `${backendUrl}/payments/zibal/callback?lang=${requestedLang}`
-        : `${backendUrl}/payments/zarinpal/callback?lang=${requestedLang}`;
+      baseResult.paymentProvider === 'SNAPPPAY'
+        ? `${backendUrl}/payments/snapppay/callback?lang=${requestedLang}`
+        : baseResult.paymentProvider === 'ZIBAL'
+          ? `${backendUrl}/payments/zibal/callback?lang=${requestedLang}`
+          : `${backendUrl}/payments/zarinpal/callback?lang=${requestedLang}`;
     const amountToman = Math.round(Number(baseResult.payableAmount));
 
     if (amountToman === 0) {
@@ -1199,7 +1295,14 @@ export class BasketController {
       isMock: boolean;
     };
     try {
-      if (baseResult.paymentProvider === 'ZIBAL') {
+      if (baseResult.paymentProvider === 'SNAPPPAY') {
+        requested = await this.requestSnappPayment({
+          orderId: baseResult.orderId,
+          transactionId: snappTransactionId!,
+          returnURL: callbackUrl,
+          mobile: req.user?.mobile,
+        });
+      } else if (baseResult.paymentProvider === 'ZIBAL') {
         requested = await this.paymentService.requestZibalPayment({
           amountRial: amountToman * 10,
           description: `Order ${baseResult.orderId}`,

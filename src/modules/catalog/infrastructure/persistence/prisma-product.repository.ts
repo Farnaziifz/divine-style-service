@@ -324,6 +324,10 @@ export class PrismaProductRepository implements IProductRepository {
         categoryId,
         showInRack: true,
         isDeleted: false,
+        // فقط محصولاتی که واقعاً در رگال به مشتری نمایش داده می‌شوند (فعال و دارای موجودی)؛
+        // همان شرط findAll برای مشتری، تا محصولات تمام‌شده/غیرفعال سقف ۷ تایی را اشغال نکنند
+        isActive: true,
+        variants: { some: { isDeleted: false, stock: { gt: 0 } } },
         ...(excludeProductId ? { id: { not: excludeProductId } } : {}),
       },
     });

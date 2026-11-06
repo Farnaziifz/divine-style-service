@@ -565,6 +565,7 @@ enum PaymentStatus {
 enum PaymentProvider {
   ZARINPAL
   ZIBAL
+  SNAPPPAY
 }
 
 enum PaymentTransactionStatus {
@@ -648,6 +649,10 @@ model PaymentTransaction {
   amount     Decimal                  @db.Decimal(10, 2)
   authority  String?                  @unique
   refId      String?
+  /// شناسهٔ تراکنش سمت پذیرنده که به اسنپ‌پی می‌دهیم (transactionId) — کال‌بک فقط همین را برمی‌گرداند
+  gatewayTransactionId String?        @unique
+  /// آخرین وضعیت شناخته‌شده در درگاه (مثلاً اسنپ‌پی: VERIFY / SETTLE / CANCEL ...)
+  gatewayStatus        String?
   createdAt  DateTime                 @default(now())
   verifiedAt DateTime?
   isDeleted  Boolean                  @default(false)

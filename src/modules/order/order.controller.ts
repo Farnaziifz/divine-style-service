@@ -66,6 +66,7 @@ export class OrderController {
     @Query() pagination: PaginationDto,
     @Query('q') q?: string,
     @Query('userId') userId?: string,
+    @Query('paymentProvider') paymentProvider?: string,
   ) {
     const page = pagination.page ?? 1;
     const limit = pagination.limit ?? 10;
@@ -76,6 +77,15 @@ export class OrderController {
       where.userId = req.user.id;
     } else if (userId) {
       where.userId = userId;
+    }
+    if (
+      paymentProvider === 'SNAPPPAY' ||
+      paymentProvider === 'ZARINPAL' ||
+      paymentProvider === 'ZIBAL'
+    ) {
+      where.payments = {
+        some: { provider: paymentProvider, isDeleted: false },
+      };
     }
     const query = (q ?? '').trim();
     if (query) {
@@ -129,6 +139,8 @@ export class OrderController {
               amount: true,
               authority: true,
               refId: true,
+              gatewayTransactionId: true,
+              gatewayStatus: true,
               createdAt: true,
               verifiedAt: true,
             },
@@ -251,6 +263,8 @@ export class OrderController {
             amount: true,
             authority: true,
             refId: true,
+            gatewayTransactionId: true,
+            gatewayStatus: true,
             createdAt: true,
             verifiedAt: true,
           },
